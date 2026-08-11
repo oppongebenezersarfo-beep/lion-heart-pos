@@ -6,10 +6,11 @@
   "scripts": {
     "install:all": "cd server && npm install && cd ../client && npm install",
     "build:client": "cd client && npm run build",
-    "build:server": "cd server && npx tsc",
+    "build:server": "cd server && npm run build",
     "build": "npm run build:server && npm run build:client",
     "start": "cd server && node dist/index.js",
     "dev": "cd server && npm run dev",
-    "seed": "cd server && node seed-demo.js"
+    "seed": "cd server && node seed-demo.js",
+    "postinstall": "cd server && npm install && cd ../client && npm install"
   }
 }
