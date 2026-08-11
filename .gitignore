@@ -1,0 +1,11 @@
+node_modules/
+client/dist/
+server/dist/
+server/data/
+*.db
+.env
+*.log
+server/check-db.js
+server/check-users.js
+server/fix-all-passwords.js
+server/fix-password.js
