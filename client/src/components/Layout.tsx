@@ -13,6 +13,7 @@ import {
   HiOutlineCog,
   HiOutlineArrowRightOnRectangle,
   HiOutlineArrowUturnLeft,
+  HiOutlineArrowPath,
 } from 'react-icons/hi2';
 
 interface LayoutProps {
@@ -29,6 +30,7 @@ const navItems = [
   { path: '/purchases', label: 'Purchases', icon: HiOutlineDocumentText, roles: ['admin', 'manager'] },
   { path: '/reports', label: 'Reports', icon: HiOutlineChartBar, roles: ['admin', 'manager'] },
   { path: '/returns', label: 'Returns', icon: HiOutlineArrowUturnLeft, roles: ['admin', 'manager'] },
+  { path: '/offline-queue', label: 'Offline Queue', icon: HiOutlineArrowPath, roles: ['admin', 'manager'] },
   { path: '/shifts', label: 'Shifts', icon: HiOutlineClock, roles: ['admin', 'manager', 'cashier'] },
   { path: '/settings', label: 'Settings', icon: HiOutlineCog, roles: ['admin'] },
 ];

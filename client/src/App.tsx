@@ -15,6 +15,7 @@ import SalesReport from './pages/Reports/SalesReport';
 import ShiftManager from './pages/Shifts/ShiftManager';
 import UserManagement from './pages/Settings/UserManagement';
 import Returns from './pages/Sales/Returns';
+import OfflineSalesQueue from './pages/Sales/OfflineSalesQueue';
 
 function ProtectedRoute({ children, roles }: { children: React.ReactNode; roles?: string[] }) {
   const { user } = useAuth();
@@ -77,11 +78,16 @@ function AppRoutes() {
             <UserManagement />
           </ProtectedRoute>
         } />
-        <Route path="/returns" element={
-          <ProtectedRoute roles={['admin', 'manager']}>
-            <Returns />
-          </ProtectedRoute>
-        } />
+      <Route path="/returns" element={
+        <ProtectedRoute roles={['admin', 'manager']}>
+          <Returns />
+        </ProtectedRoute>
+      } />
+      <Route path="/offline-queue" element={
+        <ProtectedRoute roles={['admin', 'manager']}>
+          <OfflineSalesQueue />
+        </ProtectedRoute>
+      } />
         <Route path="*" element={<Navigate to="/pos" />} />
       </Routes>
     </OfflineSyncContext.Provider>
