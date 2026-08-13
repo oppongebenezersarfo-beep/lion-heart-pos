@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { productsAPI, salesAPI, authAPI, customersAPI } from '../../services/api';
-import { cacheProducts, searchCachedProducts, cacheCustomers, searchCachedCustomers, holdSale, getHeldSales, deleteHeldSale, queueOfflineSale } from '../../db';
+import { productsAPI, salesAPI, authAPI, customersAPI, usersAPI } from '../../services/api';
+import { cacheProducts, searchCachedProducts, cacheCustomers, searchCachedCustomers, cacheUsers, verifyPinOffline, holdSale, getHeldSales, deleteHeldSale, queueOfflineSale } from '../../db';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import { formatCedis } from '../../utils/format';
 import toast from 'react-hot-toast';
@@ -169,7 +169,12 @@ export default function Checkout() {
     const pin = prompt('Enter manager PIN to apply discount:');
     if (!pin) return;
     try {
-      await authAPI.verifyPin(pin, 'discount');
+      if (isOnline) {
+        await authAPI.verifyPin(pin, 'discount');
+      } else {
+        const valid = await verifyPinOffline(pin);
+        if (!valid) throw new Error('Invalid PIN');
+      }
       setDiscountItemId(itemId);
       setShowDiscountModal(true);
     } catch { toast.error('Invalid manager PIN'); }
@@ -306,12 +311,14 @@ export default function Checkout() {
     const loadCache = async () => {
       if (isOnline) {
         try {
-          const [prodRes, custRes] = await Promise.all([
+          const [prodRes, custRes, usersRes] = await Promise.all([
             productsAPI.getAll(),
             customersAPI.getAll(),
+            usersAPI.getAll(),
           ]);
           await cacheProducts(prodRes.data);
           await cacheCustomers(custRes.data);
+          await cacheUsers(usersRes.data);
         } catch (e) { console.error(e); }
       }
     };

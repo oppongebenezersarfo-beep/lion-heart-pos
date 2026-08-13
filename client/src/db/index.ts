@@ -49,6 +49,14 @@ export interface OfflineSale {
   retry_count: number;
 }
 
+export interface CachedUser {
+  id: string;
+  username: string;
+  full_name: string;
+  role: string;
+  pin: string;
+}
+
 export interface HeldSale {
   id?: number;
   sale_data: any;
@@ -59,14 +67,16 @@ export interface HeldSale {
 class LionHeartDB extends Dexie {
   products!: Table<CachedProduct>;
   customers!: Table<CachedCustomer>;
+  users!: Table<CachedUser>;
   offlineQueue!: Table<OfflineSale>;
   heldSales!: Table<HeldSale>;
 
   constructor() {
     super('LionHeartPOS');
-    this.version(2).stores({
+    this.version(3).stores({
       products: 'id, sku, barcode, name, category_id, cached_at',
       customers: 'id, name, phone, cached_at',
+      users: 'id, role, pin',
       offlineQueue: '++id, synced, cashier_id, created_at',
       heldSales: '++id, cashier_id, created_at',
     });
@@ -177,4 +187,17 @@ export async function getHeldSales(cashierId: string): Promise<HeldSale[]> {
 
 export async function deleteHeldSale(id: number) {
   await db.heldSales.delete(id);
+}
+
+export async function cacheUsers(users: CachedUser[]) {
+  const managers = users.filter(u => u.role === 'admin' || u.role === 'manager');
+  await db.transaction('rw', db.users, async () => {
+    await db.users.clear();
+    await db.users.bulkAdd(managers);
+  });
+}
+
+export async function verifyPinOffline(pin: string): Promise<boolean> {
+  const user = await db.users.where('pin').equals(pin).first();
+  return !!user;
 }
