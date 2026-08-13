@@ -17,6 +17,7 @@ import {
 
 interface LayoutProps {
   children: ReactNode;
+  pendingSyncCount?: number;
 }
 
 const navItems = [
@@ -32,7 +33,7 @@ const navItems = [
   { path: '/settings', label: 'Settings', icon: HiOutlineCog, roles: ['admin'] },
 ];
 
-export default function Layout({ children }: LayoutProps) {
+export default function Layout({ children, pendingSyncCount = 0 }: LayoutProps) {
   const { user, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
@@ -51,9 +52,7 @@ export default function Layout({ children }: LayoutProps) {
 
   return (
     <div className="flex h-screen bg-gray-950">
-      {/* Sidebar */}
       <aside className="w-64 bg-gray-900 border-r border-gray-800 flex flex-col">
-        {/* Logo */}
         <div className="p-4 border-b border-gray-800">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-lion-gold rounded-lg flex items-center justify-center">
@@ -66,7 +65,6 @@ export default function Layout({ children }: LayoutProps) {
           </div>
         </div>
 
-        {/* Navigation */}
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
           {filteredNav.map((item) => {
             const Icon = item.icon;
@@ -85,7 +83,6 @@ export default function Layout({ children }: LayoutProps) {
           })}
         </nav>
 
-        {/* User section */}
         <div className="p-3 border-t border-gray-800">
           <div className="flex items-center gap-3 mb-3 px-2">
             <div className="w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center">
@@ -108,9 +105,7 @@ export default function Layout({ children }: LayoutProps) {
         </div>
       </aside>
 
-      {/* Main content */}
       <main className="flex-1 flex flex-col overflow-hidden">
-        {/* Top bar */}
         <header className="h-14 bg-gray-900 border-b border-gray-800 flex items-center justify-between px-6">
           <div className="flex items-center gap-4">
             <h2 className="text-lg font-semibold">
@@ -118,7 +113,12 @@ export default function Layout({ children }: LayoutProps) {
             </h2>
           </div>
           <div className="flex items-center gap-4">
-            {/* Online/Offline indicator */}
+            {pendingSyncCount > 0 && (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium bg-yellow-500/20 text-yellow-400">
+                <div className="w-2 h-2 rounded-full bg-yellow-400 animate-pulse" />
+                {pendingSyncCount} pending sync
+              </div>
+            )}
             <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium ${
               isOnline
                 ? 'bg-green-500/20 text-green-400'
@@ -133,7 +133,6 @@ export default function Layout({ children }: LayoutProps) {
           </div>
         </header>
 
-        {/* Page content */}
         <div className="flex-1 overflow-auto p-6">
           {children}
         </div>

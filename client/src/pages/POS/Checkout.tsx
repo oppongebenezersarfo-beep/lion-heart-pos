@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { productsAPI, salesAPI, authAPI, customersAPI } from '../../services/api';
-import { cacheProducts, searchCachedProducts, holdSale, getHeldSales, deleteHeldSale, queueOfflineSale } from '../../db';
+import { cacheProducts, searchCachedProducts, cacheCustomers, searchCachedCustomers, holdSale, getHeldSales, deleteHeldSale, queueOfflineSale } from '../../db';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import { formatCedis } from '../../utils/format';
 import toast from 'react-hot-toast';
@@ -71,10 +71,20 @@ export default function Checkout() {
   const searchCustomers = useCallback(async (query: string) => {
     if (!query.trim()) { setCustomerResults([]); return; }
     try {
-      const response = await customersAPI.getAll({ search: query });
-      setCustomerResults(response.data.slice(0, 5));
-    } catch { console.error('Customer search failed'); }
-  }, []);
+      if (isOnline) {
+        const response = await customersAPI.getAll({ search: query });
+        setCustomerResults(response.data.slice(0, 5));
+      } else {
+        const results = await searchCachedCustomers(query);
+        setCustomerResults(results.slice(0, 5));
+      }
+    } catch {
+      try {
+        const results = await searchCachedCustomers(query);
+        setCustomerResults(results.slice(0, 5));
+      } catch { console.error('Customer search failed'); }
+    }
+  }, [isOnline]);
 
   // Handle barcode scan input
   const handleBarcodeInput = useCallback(async (barcode: string) => {
@@ -295,7 +305,14 @@ export default function Checkout() {
   useEffect(() => {
     const loadCache = async () => {
       if (isOnline) {
-        try { const r = await productsAPI.getAll(); await cacheProducts(r.data); } catch (e) { console.error(e); }
+        try {
+          const [prodRes, custRes] = await Promise.all([
+            productsAPI.getAll(),
+            customersAPI.getAll(),
+          ]);
+          await cacheProducts(prodRes.data);
+          await cacheCustomers(custRes.data);
+        } catch (e) { console.error(e); }
       }
     };
     loadCache();
