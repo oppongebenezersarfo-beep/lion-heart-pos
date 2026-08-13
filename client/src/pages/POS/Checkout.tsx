@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { productsAPI, salesAPI, authAPI, customersAPI, usersAPI } from '../../services/api';
+import { productsAPI, salesAPI, authAPI, customersAPI, usersAPI, paymentsAPI } from '../../services/api';
 import { cacheProducts, searchCachedProducts, cacheCustomers, searchCachedCustomers, cacheUsers, verifyPinOffline, holdSale, getHeldSales, deleteHeldSale, queueOfflineSale } from '../../db';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import { formatCedis } from '../../utils/format';
@@ -43,9 +43,132 @@ export default function Checkout() {
   const [showReceipt, setShowReceipt] = useState(false);
   const [lastSale, setLastSale] = useState<any>(null);
 
+  // Paystack MoMo state
+  const [momoPhone, setMomoPhone] = useState('');
+  const [momoProvider, setMomoProvider] = useState('mtn');
+  const [momoProcessing, setMomoProcessing] = useState(false);
+  const [momoStatus, setMomoStatus] = useState('');
+  const [momoReference, setMomoReference] = useState('');
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const subtotal = cart.reduce((sum, item) => sum + item.selling_price * item.quantity, 0);
   const totalDiscount = cart.reduce((sum, item) => sum + item.discount, 0);
   const total = subtotal - totalDiscount;
+
+  const isMoMoMethod = (method: string) => ['mtn_momo', 'telecel', 'airteltigo'].includes(method);
+
+  const providerMap: Record<string, string> = {
+    mtn_momo: 'mtn',
+    telecel: 'vod',
+    airteltigo: 'atl',
+  };
+
+  const initiateMoMoPayment = async () => {
+    if (!momoPhone.trim()) {
+      toast.error('Enter a valid mobile money number');
+      return;
+    }
+
+    const phone = momoPhone.replace(/\s+/g, '');
+    const provider = providerMap[paymentMethod] || 'mtn';
+
+    // Validate Ghana phone number
+    if (!/^(024|025|026|027|028|050|053|054|055|056|057|058|020|059|052)\d{7}$/.test(phone)) {
+      toast.error('Enter a valid Ghana mobile money number (e.g. 024XXXXXXX)');
+      return;
+    }
+
+    setMomoProcessing(true);
+    setMomoStatus('Sending payment prompt to your phone...');
+    setMomoProvider(provider);
+
+    try {
+      const res = await paymentsAPI.initiate({
+        email: selectedCustomer?.email || `${phone}@pos.lionheart.com`,
+        amount: total,
+        phone,
+        provider,
+      });
+
+      const { reference, display_text } = res.data;
+      setMomoReference(reference);
+      setMomoStatus(display_text || 'Check your phone for the payment prompt. Enter your PIN to confirm.');
+
+      // Start polling for verification
+      pollPaymentStatus(reference);
+    } catch (err: any) {
+      const msg = err.response?.data?.error || 'Failed to initiate payment. Please try again.';
+      toast.error(msg);
+      setMomoProcessing(false);
+      setMomoStatus('');
+    }
+  };
+
+  const pollPaymentStatus = (reference: string) => {
+    if (pollRef.current) clearInterval(pollRef.current);
+
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await paymentsAPI.verify(reference);
+        const { status } = res.data;
+
+        if (status === 'success') {
+          clearInterval(pollRef.current!);
+          setMomoStatus('Payment successful!');
+          toast.success('Payment confirmed!');
+          // Complete the sale
+          await completeSale();
+        } else if (status === 'failed') {
+          clearInterval(pollRef.current!);
+          setMomoStatus('Payment failed or was cancelled.');
+          toast.error('Payment was not completed.');
+          setMomoProcessing(false);
+        } else {
+          setMomoStatus('Waiting for payment confirmation... Check your phone for PIN prompt.');
+        }
+      } catch {
+        // Keep polling on transient errors
+      }
+    }, 4000);
+  };
+
+  const completeSale = async () => {
+    const saleData = {
+      items: cart.map((item) => ({
+        product_id: item.id, quantity: item.quantity, unit_price: item.selling_price,
+        discount: item.discount, total: item.selling_price * item.quantity - item.discount,
+        name: item.name,
+      })),
+      subtotal, discount_amount: totalDiscount, total,
+      payment_method: paymentMethod, payment_details: { reference: momoReference, phone: momoPhone, provider: momoProvider },
+      customer_id: selectedCustomer?.id || null,
+    };
+
+    try {
+      if (isOnline) {
+        const response = await salesAPI.create(saleData);
+        setLastSale({ ...response.data, cashier_name: user?.fullName, items: saleData.items });
+      } else {
+        const queueId = await queueOfflineSale({
+          ...saleData, cashier_id: user!.id, created_at: new Date(),
+        });
+        setLastSale({
+          id: `offline-${queueId}`, invoice_number: `OFFLINE-${Date.now()}`,
+          ...saleData, cashier_name: user?.fullName, created_at: new Date().toISOString(), status: 'queued',
+        });
+      }
+      setShowPayment(false);
+      setShowReceipt(true);
+      setCart([]);
+      setSelectedCustomer(null);
+      setMomoPhone('');
+      setMomoProcessing(false);
+      setMomoStatus('');
+      setMomoReference('');
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Failed to complete sale');
+    }
+  };
 
   // Search products
   const searchProducts = useCallback(async (query: string) => {
@@ -328,6 +451,10 @@ export default function Checkout() {
 
   useEffect(() => { barcodeInputRef.current?.focus(); }, []);
 
+  useEffect(() => {
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
+
   return (
     <div className="flex gap-6 h-full">
       {/* Left side - Products & Cart */}
@@ -462,7 +589,7 @@ export default function Checkout() {
           </div>
 
           <div className="mt-auto space-y-2">
-            <button onClick={() => cart.length > 0 && setShowPayment(true)}
+            <button onClick={() => { if (cart.length > 0) { setPaymentMethod('cash'); setMomoPhone(''); setMomoProcessing(false); setMomoStatus(''); setShowPayment(true); } }}
               disabled={cart.length === 0}
               className="btn-primary w-full py-4 text-lg">
               Pay {formatCedis(total)}
@@ -526,6 +653,31 @@ export default function Checkout() {
               </div>
             )}
 
+            {(paymentMethod === 'mtn_momo' || paymentMethod === 'telecel' || paymentMethod === 'airteltigo') && !momoProcessing && (
+              <div className="space-y-3 mb-4">
+                <input type="tel" value={momoPhone} onChange={(e) => setMomoPhone(e.target.value)}
+                  className="input-field text-lg" placeholder="Mobile Money number (e.g. 024XXXXXXX)" autoFocus />
+                {selectedCustomer?.phone && (
+                  <button type="button"
+                    onClick={() => { setMomoPhone(selectedCustomer.phone); toast.success('Customer number loaded'); }}
+                    className="btn-secondary w-full text-sm">
+                    Use Customer Number ({selectedCustomer.phone})
+                  </button>
+                )}
+                <p className="text-xs text-gray-400">You will receive a prompt on your phone to enter your PIN.</p>
+              </div>
+            )}
+
+            {(paymentMethod === 'mtn_momo' || paymentMethod === 'telecel' || paymentMethod === 'airteltigo') && momoProcessing && (
+              <div className="space-y-3 mb-4">
+                <div className="text-center py-4">
+                  <div className="animate-spin w-8 h-8 border-4 border-lion-gold border-t-transparent rounded-full mx-auto mb-3"></div>
+                  <p className="text-sm text-gray-300">{momoStatus}</p>
+                  {momoReference && <p className="text-xs text-gray-500 mt-2">Ref: {momoReference}</p>}
+                </div>
+              </div>
+            )}
+
             {paymentMethod === 'split' && (
               <div className="space-y-3 mb-4">
                 <div className="flex gap-2">
@@ -558,11 +710,15 @@ export default function Checkout() {
             )}
 
             <div className="flex gap-2">
-              <button onClick={() => setShowPayment(false)} className="btn-secondary flex-1">Cancel</button>
-              <button onClick={processPayment}
-                disabled={paymentMethod === 'credit' && !selectedCustomer}
+              <button onClick={() => { setShowPayment(false); setMomoProcessing(false); setMomoStatus(''); }}
+                className="btn-secondary flex-1">Cancel</button>
+              <button onClick={() => {
+                  if (paymentMethod === 'mtn_momo' || paymentMethod === 'telecel' || paymentMethod === 'airteltigo') { initiateMoMoPayment(); }
+                  else { processPayment(); }
+                }}
+                disabled={(paymentMethod === 'credit' && !selectedCustomer) || momoProcessing || ((paymentMethod === 'mtn_momo' || paymentMethod === 'telecel' || paymentMethod === 'airteltigo') && !momoPhone.trim())}
                 className="btn-success flex-1 py-3">
-                {paymentMethod === 'credit' ? 'Confirm Credit Sale' : 'Confirm Payment'}
+                {momoProcessing ? 'Processing...' : paymentMethod === 'credit' ? 'Confirm Credit Sale' : 'Confirm Payment'}
               </button>
             </div>
           </div>

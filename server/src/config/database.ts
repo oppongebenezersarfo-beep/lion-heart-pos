@@ -22,6 +22,18 @@ if (existsSync(migrationPath)) {
   }
 }
 
+// Auto-run transactions migration
+const txMigrationPath = path.join(__dirname, '../../migrations/002_transactions.sql');
+if (existsSync(txMigrationPath)) {
+  const txCheck = sqliteDb.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='transactions'").get();
+  if (!txCheck) {
+    console.log('Running transactions migration...');
+    const txMigration = readFileSync(txMigrationPath, 'utf8');
+    sqliteDb.exec(txMigration);
+    console.log('Transactions migration complete');
+  }
+}
+
 function transformSQL(sql: string): string {
   return sql
     .replace(/\$\d+/g, () => '?')

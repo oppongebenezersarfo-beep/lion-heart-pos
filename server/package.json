@@ -12,6 +12,7 @@
     "seed": "node seed-demo.js"
   },
   "dependencies": {
+    "axios": "^1.19.0",
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^11.7.0",
     "cors": "^2.8.5",

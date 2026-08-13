@@ -117,4 +117,11 @@ export const usersAPI = {
   delete: (id: string) => api.delete(`/users/${id}`),
 };
 
+// Payments (Paystack MoMo)
+export const paymentsAPI = {
+  initiate: (data: { email: string; amount: number; phone: string; provider: string; sale_id?: string }) =>
+    api.post('/payments/initiate', data),
+  verify: (reference: string) => api.get(`/payments/verify/${reference}`),
+};
+
 export default api;
