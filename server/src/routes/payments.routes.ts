@@ -91,7 +91,10 @@ router.post('/initiate', authenticate, async (req: AuthRequest, res: Response) =
 
     const { data } = chargeResponse.data;
 
-    console.log(`Paystack charge for ${reference}: status=${data.status}, gateway=${data.gateway_response}`);
+    console.log(`Paystack charge for ${reference}: status=${data.status}, gateway=${data.gateway_response}, ps_ref=${data.reference}`);
+
+    // Paystack may return its own reference — store it for OTP submission
+    const paystackRef = data.reference || reference;
 
     // Store Paystack's response
     pool.query(
@@ -108,6 +111,7 @@ router.post('/initiate', authenticate, async (req: AuthRequest, res: Response) =
 
     res.status(201).json({
       reference,
+      paystack_reference: paystackRef,
       status: data.status || 'pending',
       display_text: data.display_text || data.gateway_response || 'Check your phone for the payment prompt',
     });

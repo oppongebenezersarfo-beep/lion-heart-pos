@@ -49,6 +49,7 @@ export default function Checkout() {
   const [momoProcessing, setMomoProcessing] = useState(false);
   const [momoStatus, setMomoStatus] = useState('');
   const [momoReference, setMomoReference] = useState('');
+  const [momoPaystackRef, setMomoPaystackRef] = useState('');
   const [momoNeedsOtp, setMomoNeedsOtp] = useState(false);
   const [momoOtp, setMomoOtp] = useState('');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -91,8 +92,9 @@ export default function Checkout() {
         provider,
       });
 
-      const { reference, status, display_text } = res.data;
+      const { reference, paystack_reference, status, display_text } = res.data;
       setMomoReference(reference);
+      setMomoPaystackRef(paystack_reference || reference);
 
       if (status === 'success') {
         setMomoStatus('Payment successful!');
@@ -130,7 +132,7 @@ export default function Checkout() {
 
     try {
       const res = await paymentsAPI.submitOtp({
-        reference: momoReference,
+        reference: momoPaystackRef,
         otp: momoOtp.trim(),
       });
 
@@ -147,8 +149,10 @@ export default function Checkout() {
         toast.error('Payment was not completed.');
         setMomoProcessing(false);
       } else {
-        setMomoStatus(display_text || 'Enter your MoMo PIN on your phone to complete payment.');
-        setMomoProcessing(false);
+        // OTP accepted — customer should now see PIN prompt on phone
+        setMomoNeedsOtp(false);
+        setMomoProcessing(true);
+        setMomoStatus(display_text || 'OTP accepted! Check your phone for the MoMo PIN prompt...');
         pollPaymentStatus(momoReference);
       }
     } catch (err: any) {
