@@ -31,6 +31,13 @@ if (existsSync(txMigrationPath)) {
     const txMigration = readFileSync(txMigrationPath, 'utf8');
     sqliteDb.exec(txMigration);
     console.log('Transactions migration complete');
+  } else {
+    // Add access_code column if it doesn't exist
+    const colCheck = sqliteDb.prepare("SELECT name FROM pragma_table_info('transactions') WHERE name='access_code'").get();
+    if (!colCheck) {
+      console.log('Adding access_code column to transactions...');
+      sqliteDb.exec("ALTER TABLE transactions ADD COLUMN access_code TEXT");
+    }
   }
 }
 
