@@ -139,7 +139,7 @@ router.post('/submit-otp', authenticate, async (req: AuthRequest, res: Response)
 
     console.log(`Submitting OTP for ${reference}`);
 
-    const submitResponse = await paystackApi.post(`/charge/${reference}/submit_otp`, {
+    const submitResponse = await paystackApi.post('/charge/submit_otp', {
       otp,
       reference,
     });
