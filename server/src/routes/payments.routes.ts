@@ -65,16 +65,13 @@ router.post('/initiate', authenticate, async (req: AuthRequest, res: Response) =
       [crypto.randomUUID(), reference, email, phone, provider, amountInPesewas, sale_id || null]
     );
 
-    // Call Paystack Charge API
-    const chargeResponse = await paystackApi.post('/charge', {
+    // Use Transaction Initialize — handles MoMo PIN prompt natively on customer's phone
+    const initResponse = await paystackApi.post('/transaction/initialize', {
       email,
       amount: amountInPesewas,
       currency: 'GHS',
-      mobile_money: {
-        phone,
-        provider,
-      },
       reference,
+      callback_url: `${req.protocol}://${req.get('host')}/api/payments/verify/${reference}`,
       metadata: {
         custom_fields: [
           {
@@ -82,34 +79,35 @@ router.post('/initiate', authenticate, async (req: AuthRequest, res: Response) =
             variable_name: 'sale_id',
             value: sale_id || '',
           },
+          {
+            display_name: 'Phone',
+            variable_name: 'phone',
+            value: phone,
+          },
+          {
+            display_name: 'Provider',
+            variable_name: 'provider',
+            value: provider,
+          },
         ],
       },
     });
 
-    const { data } = chargeResponse.data;
+    const { data } = initResponse.data;
 
-    console.log(`Paystack charge for ${reference}: status=${data.status}, display=${data.display_text}, ps_ref=${data.reference}`);
-
-    // Paystack may return its own reference — use that for OTP submission
-    const paystackRef = data.reference || reference;
+    console.log(`Paystack initialize for ${reference}: access=${data.access_code}, auth_url=${data.authorization_url}`);
 
     pool.query(
-      `UPDATE transactions SET paystack_response = ?, updated_at = datetime('now') WHERE reference = ?`,
-      [JSON.stringify(data), reference]
+      `UPDATE transactions SET paystack_response = ?, access_code = ?, updated_at = datetime('now') WHERE reference = ?`,
+      [JSON.stringify(data), data.access_code || null, reference]
     );
-
-    if (data.status === 'success') {
-      pool.query(
-        `UPDATE transactions SET status = 'success', updated_at = datetime('now') WHERE reference = ?`,
-        [reference]
-      );
-    }
 
     res.status(201).json({
       reference,
-      paystack_reference: paystackRef,
-      status: data.status || 'pending',
-      display_text: data.display_text || data.gateway_response || 'Check your phone for the payment prompt',
+      status: 'pending',
+      authorization_url: data.authorization_url,
+      access_code: data.access_code,
+      display_text: 'Open the payment link on your phone to complete payment',
     });
   } catch (error: any) {
     console.error('Paystack initiate error:', error.response?.data || error.message);

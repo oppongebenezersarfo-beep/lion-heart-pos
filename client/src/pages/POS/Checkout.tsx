@@ -49,9 +49,7 @@ export default function Checkout() {
   const [momoProcessing, setMomoProcessing] = useState(false);
   const [momoStatus, setMomoStatus] = useState('');
   const [momoReference, setMomoReference] = useState('');
-  const [momoPaystackRef, setMomoPaystackRef] = useState('');
-  const [momoNeedsOtp, setMomoNeedsOtp] = useState(false);
-  const [momoOtp, setMomoOtp] = useState('');
+  const [momoAuthUrl, setMomoAuthUrl] = useState('');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const subtotal = cart.reduce((sum, item) => sum + item.selling_price * item.quantity, 0);
@@ -81,7 +79,7 @@ export default function Checkout() {
     }
 
     setMomoProcessing(true);
-    setMomoStatus('Sending payment prompt to your phone...');
+    setMomoStatus('Generating payment link...');
     setMomoProvider(provider);
 
     try {
@@ -92,71 +90,16 @@ export default function Checkout() {
         provider,
       });
 
-      const { reference, paystack_reference, status, display_text } = res.data;
+      const { reference, authorization_url, status, display_text } = res.data;
       setMomoReference(reference);
-      setMomoPaystackRef(paystack_reference || reference);
-      setMomoStatus(display_text || 'Processing...');
-
-      if (status === 'success') {
-        clearInterval(pollRef.current!);
-        setMomoStatus('Payment successful!');
-        toast.success('Payment confirmed!');
-        await completeSale();
-      } else if (status === 'failed') {
-        clearInterval(pollRef.current!);
-        setMomoStatus('Payment failed or was cancelled.');
-        toast.error('Payment was not completed.');
-        setMomoProcessing(false);
-      } else {
-        // For send_otp or any other pending status — the customer enters PIN on their phone
-        setMomoProcessing(true);
-        setMomoStatus(display_text || 'Please enter your PIN on your phone when prompted...');
-        pollPaymentStatus(reference);
-      }
+      setMomoAuthUrl(authorization_url || '');
+      setMomoStatus('Scan QR code or tap the link on your phone to pay');
+      setMomoProcessing(false);
     } catch (err: any) {
       const msg = err.response?.data?.error || 'Failed to initiate payment. Please try again.';
       toast.error(msg);
       setMomoProcessing(false);
       setMomoStatus('');
-    }
-  };
-
-  const submitMomoOtp = async () => {
-    if (!momoOtp.trim()) {
-      toast.error('Enter the OTP');
-      return;
-    }
-    setMomoProcessing(true);
-    setMomoNeedsOtp(false);
-    setMomoStatus('Verifying OTP...');
-
-    try {
-      const res = await paymentsAPI.submitOtp({
-        reference: momoPaystackRef,
-        otp: momoOtp.trim(),
-      });
-
-      const { status, display_text } = res.data;
-      setMomoStatus(display_text || 'Processing...');
-      setMomoOtp('');
-
-      if (status === 'success') {
-        setMomoStatus('Payment successful!');
-        toast.success('Payment confirmed!');
-        await completeSale();
-      } else if (status === 'failed') {
-        setMomoStatus('Payment failed or was cancelled.');
-        toast.error('Payment was not completed.');
-        setMomoProcessing(false);
-      } else {
-        pollPaymentStatus(momoReference);
-      }
-    } catch (err: any) {
-      const msg = err.response?.data?.error || 'OTP verification failed.';
-      toast.error(msg);
-      setMomoProcessing(false);
-      setMomoNeedsOtp(true);
-      setMomoStatus('OTP verification failed. Please try again.');
     }
   };
 
@@ -644,7 +587,7 @@ export default function Checkout() {
           </div>
 
           <div className="mt-auto space-y-2">
-            <button onClick={() => { if (cart.length > 0) { setPaymentMethod('cash'); setMomoPhone(''); setMomoProcessing(false); setMomoStatus(''); setMomoNeedsOtp(false); setMomoOtp(''); setMomoPaystackRef(''); setShowPayment(true); } }}
+            <button onClick={() => { if (cart.length > 0) { setPaymentMethod('cash'); setMomoPhone(''); setMomoProcessing(false); setMomoStatus(''); setMomoAuthUrl(''); setShowPayment(true); } }}
               disabled={cart.length === 0}
               className="btn-primary w-full py-4 text-lg">
               Pay {formatCedis(total)}
@@ -708,7 +651,7 @@ export default function Checkout() {
               </div>
             )}
 
-            {(paymentMethod === 'mtn_momo' || paymentMethod === 'telecel' || paymentMethod === 'airteltigo') && !momoProcessing && !momoNeedsOtp && (
+            {(paymentMethod === 'mtn_momo' || paymentMethod === 'telecel' || paymentMethod === 'airteltigo') && !momoProcessing && !momoAuthUrl && (
               <div className="space-y-3 mb-4">
                 <input type="tel" value={momoPhone} onChange={(e) => setMomoPhone(e.target.value)}
                   className="input-field text-lg" placeholder="Mobile Money number (e.g. 024XXXXXXX)" autoFocus />
@@ -719,7 +662,7 @@ export default function Checkout() {
                     Use Customer Number ({selectedCustomer.phone})
                   </button>
                 )}
-                <p className="text-xs text-gray-400">You will receive a prompt on your phone to enter your PIN.</p>
+                <p className="text-xs text-gray-400">You will receive a PIN prompt on your phone to confirm payment.</p>
               </div>
             )}
 
@@ -728,8 +671,25 @@ export default function Checkout() {
                 <div className="text-center py-4">
                   <div className="animate-spin w-8 h-8 border-4 border-lion-gold border-t-transparent rounded-full mx-auto mb-3"></div>
                   <p className="text-sm text-gray-300">{momoStatus}</p>
-                  {momoReference && <p className="text-xs text-gray-500 mt-1">Ref: {momoReference}</p>}
                 </div>
+              </div>
+            )}
+
+            {(paymentMethod === 'mtn_momo' || paymentMethod === 'telecel' || paymentMethod === 'airteltigo') && !momoProcessing && momoAuthUrl && (
+              <div className="space-y-3 mb-4">
+                <div className="bg-green-900/30 border border-green-600 rounded-lg p-4 text-center">
+                  <p className="text-green-400 text-sm font-medium mb-2">Payment Link Ready</p>
+                  <p className="text-xs text-gray-400 mb-3">{momoStatus}</p>
+                  <a href={momoAuthUrl} target="_blank" rel="noopener noreferrer"
+                    className="btn-success inline-block py-2 px-4 text-sm">
+                    Open Payment Link
+                  </a>
+                  <p className="text-xs text-gray-500 mt-2">Or open this link on your phone: {momoAuthUrl}</p>
+                </div>
+                <button onClick={() => pollPaymentStatus(momoReference)}
+                  className="btn-primary w-full py-3">
+                  I've Completed Payment - Verify
+                </button>
               </div>
             )}
 
@@ -765,8 +725,9 @@ export default function Checkout() {
             )}
 
             <div className="flex gap-2">
-              <button onClick={() => { setShowPayment(false); setMomoProcessing(false); setMomoStatus(''); setMomoNeedsOtp(false); setMomoOtp(''); }}
+              <button onClick={() => { if (pollRef.current) clearInterval(pollRef.current); setShowPayment(false); setMomoProcessing(false); setMomoStatus(''); setMomoAuthUrl(''); setMomoReference(''); }}
                 className="btn-secondary flex-1">Cancel</button>
+              {!momoAuthUrl && (
                 <button onClick={() => {
                     if (paymentMethod === 'mtn_momo' || paymentMethod === 'telecel' || paymentMethod === 'airteltigo') { initiateMoMoPayment(); }
                     else { processPayment(); }
@@ -775,6 +736,7 @@ export default function Checkout() {
                   className="btn-success flex-1 py-3">
                   {momoProcessing ? 'Processing...' : paymentMethod === 'credit' ? 'Confirm Credit Sale' : 'Confirm Payment'}
                 </button>
+              )}
             </div>
           </div>
         </div>

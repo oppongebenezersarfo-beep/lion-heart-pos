@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     currency TEXT DEFAULT 'GHS',
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'success', 'failed')),
     paystack_response TEXT,
+    access_code TEXT,
     sale_id TEXT REFERENCES sales(id),
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
