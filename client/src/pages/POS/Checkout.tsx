@@ -49,6 +49,7 @@ export default function Checkout() {
   const [momoProcessing, setMomoProcessing] = useState(false);
   const [momoStatus, setMomoStatus] = useState('');
   const [momoReference, setMomoReference] = useState('');
+  const [momoPaystackRef, setMomoPaystackRef] = useState('');
   const [momoNeedsOtp, setMomoNeedsOtp] = useState(false);
   const [momoOtp, setMomoOtp] = useState('');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -91,8 +92,9 @@ export default function Checkout() {
         provider,
       });
 
-      const { reference, status, display_text } = res.data;
+      const { reference, paystack_reference, status, display_text } = res.data;
       setMomoReference(reference);
+      setMomoPaystackRef(paystack_reference || reference);
       setMomoStatus(display_text || 'Processing...');
 
       if (status === 'success') {
@@ -131,7 +133,7 @@ export default function Checkout() {
 
     try {
       const res = await paymentsAPI.submitOtp({
-        reference: momoReference,
+        reference: momoPaystackRef,
         otp: momoOtp.trim(),
       });
 
@@ -643,7 +645,7 @@ export default function Checkout() {
           </div>
 
           <div className="mt-auto space-y-2">
-            <button onClick={() => { if (cart.length > 0) { setPaymentMethod('cash'); setMomoPhone(''); setMomoProcessing(false); setMomoStatus(''); setMomoNeedsOtp(false); setMomoOtp(''); setShowPayment(true); } }}
+            <button onClick={() => { if (cart.length > 0) { setPaymentMethod('cash'); setMomoPhone(''); setMomoProcessing(false); setMomoStatus(''); setMomoNeedsOtp(false); setMomoOtp(''); setMomoPaystackRef(''); setShowPayment(true); } }}
               disabled={cart.length === 0}
               className="btn-primary w-full py-4 text-lg">
               Pay {formatCedis(total)}
