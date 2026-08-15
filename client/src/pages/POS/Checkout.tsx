@@ -49,7 +49,6 @@ export default function Checkout() {
   const [momoProcessing, setMomoProcessing] = useState(false);
   const [momoStatus, setMomoStatus] = useState('');
   const [momoReference, setMomoReference] = useState('');
-  const [momoAuthUrl, setMomoAuthUrl] = useState('');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const subtotal = cart.reduce((sum, item) => sum + item.selling_price * item.quantity, 0);
@@ -79,7 +78,7 @@ export default function Checkout() {
     }
 
     setMomoProcessing(true);
-    setMomoStatus('Generating payment link...');
+    setMomoStatus('Sending PIN prompt to your phone...');
     setMomoProvider(provider);
 
     try {
@@ -90,11 +89,22 @@ export default function Checkout() {
         provider,
       });
 
-      const { reference, authorization_url, status, display_text } = res.data;
+      const { reference, status, display_text } = res.data;
       setMomoReference(reference);
-      setMomoAuthUrl(authorization_url || '');
-      setMomoStatus('Scan QR code or tap the link on your phone to pay');
-      setMomoProcessing(false);
+
+      if (status === 'success') {
+        setMomoStatus('Payment successful!');
+        toast.success('Payment confirmed!');
+        setMomoProcessing(false);
+        await completeSale();
+      } else if (status === 'failed') {
+        setMomoStatus('Payment failed or was cancelled.');
+        toast.error('Payment was not completed.');
+        setMomoProcessing(false);
+      } else {
+        setMomoStatus(display_text || 'Check your phone for the PIN prompt. Enter your MoMo PIN to pay.');
+        pollPaymentStatus(reference);
+      }
     } catch (err: any) {
       const msg = err.response?.data?.error || 'Failed to initiate payment. Please try again.';
       toast.error(msg);
@@ -587,7 +597,7 @@ export default function Checkout() {
           </div>
 
           <div className="mt-auto space-y-2">
-            <button onClick={() => { if (cart.length > 0) { setPaymentMethod('cash'); setMomoPhone(''); setMomoProcessing(false); setMomoStatus(''); setMomoAuthUrl(''); setShowPayment(true); } }}
+            <button onClick={() => { if (cart.length > 0) { setPaymentMethod('cash'); setMomoPhone(''); setMomoProcessing(false); setMomoStatus(''); setShowPayment(true); } }}
               disabled={cart.length === 0}
               className="btn-primary w-full py-4 text-lg">
               Pay {formatCedis(total)}
@@ -651,7 +661,7 @@ export default function Checkout() {
               </div>
             )}
 
-            {(paymentMethod === 'mtn_momo' || paymentMethod === 'telecel' || paymentMethod === 'airteltigo') && !momoProcessing && !momoAuthUrl && (
+            {(paymentMethod === 'mtn_momo' || paymentMethod === 'telecel' || paymentMethod === 'airteltigo') && !momoProcessing && (
               <div className="space-y-3 mb-4">
                 <input type="tel" value={momoPhone} onChange={(e) => setMomoPhone(e.target.value)}
                   className="input-field text-lg" placeholder="Mobile Money number (e.g. 024XXXXXXX)" autoFocus />
@@ -662,7 +672,7 @@ export default function Checkout() {
                     Use Customer Number ({selectedCustomer.phone})
                   </button>
                 )}
-                <p className="text-xs text-gray-400">You will receive a PIN prompt on your phone to confirm payment.</p>
+                <p className="text-xs text-gray-400">Customer will receive a PIN prompt on their phone.</p>
               </div>
             )}
 
@@ -671,25 +681,8 @@ export default function Checkout() {
                 <div className="text-center py-4">
                   <div className="animate-spin w-8 h-8 border-4 border-lion-gold border-t-transparent rounded-full mx-auto mb-3"></div>
                   <p className="text-sm text-gray-300">{momoStatus}</p>
+                  {momoReference && <p className="text-xs text-gray-500 mt-1">Ref: {momoReference}</p>}
                 </div>
-              </div>
-            )}
-
-            {(paymentMethod === 'mtn_momo' || paymentMethod === 'telecel' || paymentMethod === 'airteltigo') && !momoProcessing && momoAuthUrl && (
-              <div className="space-y-3 mb-4">
-                <div className="bg-green-900/30 border border-green-600 rounded-lg p-4 text-center">
-                  <p className="text-green-400 text-sm font-medium mb-2">Payment Link Ready</p>
-                  <p className="text-xs text-gray-400 mb-3">{momoStatus}</p>
-                  <a href={momoAuthUrl} target="_blank" rel="noopener noreferrer"
-                    className="btn-success inline-block py-2 px-4 text-sm">
-                    Open Payment Link
-                  </a>
-                  <p className="text-xs text-gray-500 mt-2">Or open this link on your phone: {momoAuthUrl}</p>
-                </div>
-                <button onClick={() => pollPaymentStatus(momoReference)}
-                  className="btn-primary w-full py-3">
-                  I've Completed Payment - Verify
-                </button>
               </div>
             )}
 
@@ -725,9 +718,8 @@ export default function Checkout() {
             )}
 
             <div className="flex gap-2">
-              <button onClick={() => { if (pollRef.current) clearInterval(pollRef.current); setShowPayment(false); setMomoProcessing(false); setMomoStatus(''); setMomoAuthUrl(''); setMomoReference(''); }}
+              <button onClick={() => { if (pollRef.current) clearInterval(pollRef.current); setShowPayment(false); setMomoProcessing(false); setMomoStatus(''); setMomoReference(''); }}
                 className="btn-secondary flex-1">Cancel</button>
-              {!momoAuthUrl && (
                 <button onClick={() => {
                     if (paymentMethod === 'mtn_momo' || paymentMethod === 'telecel' || paymentMethod === 'airteltigo') { initiateMoMoPayment(); }
                     else { processPayment(); }
@@ -736,7 +728,6 @@ export default function Checkout() {
                   className="btn-success flex-1 py-3">
                   {momoProcessing ? 'Processing...' : paymentMethod === 'credit' ? 'Confirm Credit Sale' : 'Confirm Payment'}
                 </button>
-              )}
             </div>
           </div>
         </div>

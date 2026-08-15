@@ -65,13 +65,16 @@ router.post('/initiate', authenticate, async (req: AuthRequest, res: Response) =
       [crypto.randomUUID(), reference, email, phone, provider, amountInPesewas, sale_id || null]
     );
 
-    // Use Transaction Initialize — handles MoMo PIN prompt natively on customer's phone
-    const initResponse = await paystackApi.post('/transaction/initialize', {
+    // Direct Charge API — sends USSD PIN prompt directly to customer's phone
+    const chargeResponse = await paystackApi.post('/charge', {
       email,
       amount: amountInPesewas,
       currency: 'GHS',
+      mobile_money: {
+        phone,
+        provider,
+      },
       reference,
-      callback_url: `${req.protocol}://${req.get('host')}/api/payments/verify/${reference}`,
       metadata: {
         custom_fields: [
           {
@@ -79,35 +82,31 @@ router.post('/initiate', authenticate, async (req: AuthRequest, res: Response) =
             variable_name: 'sale_id',
             value: sale_id || '',
           },
-          {
-            display_name: 'Phone',
-            variable_name: 'phone',
-            value: phone,
-          },
-          {
-            display_name: 'Provider',
-            variable_name: 'provider',
-            value: provider,
-          },
         ],
       },
     });
 
-    const { data } = initResponse.data;
+    const { data } = chargeResponse.data;
 
-    console.log(`Paystack initialize for ${reference}: access=${data.access_code}, auth_url=${data.authorization_url}`);
+    console.log(`Paystack charge for ${reference}: status=${data.status}, gateway=${data.gateway_response}`);
 
+    // Store Paystack's response
     pool.query(
-      `UPDATE transactions SET paystack_response = ?, access_code = ?, updated_at = datetime('now') WHERE reference = ?`,
-      [JSON.stringify(data), data.access_code || null, reference]
+      `UPDATE transactions SET paystack_response = ?, updated_at = datetime('now') WHERE reference = ?`,
+      [JSON.stringify(data), reference]
     );
+
+    if (data.status === 'success') {
+      pool.query(
+        `UPDATE transactions SET status = 'success', updated_at = datetime('now') WHERE reference = ?`,
+        [reference]
+      );
+    }
 
     res.status(201).json({
       reference,
-      status: 'pending',
-      authorization_url: data.authorization_url,
-      access_code: data.access_code,
-      display_text: 'Open the payment link on your phone to complete payment',
+      status: data.status || 'pending',
+      display_text: data.display_text || data.gateway_response || 'Check your phone for the payment prompt',
     });
   } catch (error: any) {
     console.error('Paystack initiate error:', error.response?.data || error.message);
@@ -119,92 +118,6 @@ router.post('/initiate', authenticate, async (req: AuthRequest, res: Response) =
     }
 
     res.status(500).json({ error: 'Failed to initiate payment. Please try again.' });
-  }
-});
-
-// Submit OTP for mobile money payment
-router.post('/submit-otp', authenticate, async (req: AuthRequest, res: Response) => {
-  try {
-    const { reference, otp } = req.body;
-
-    if (!reference || !otp) {
-      return res.status(400).json({ error: 'reference and otp are required.' });
-    }
-
-    console.log(`Submitting OTP for ${reference}`);
-
-    // Try submit_otp endpoint — if it fails, the charge is phone-based (MoMo) and OTP is entered on device
-    try {
-      const submitResponse = await paystackApi.post(`/charge/${reference}/submit_otp`, {
-        otp,
-        reference,
-      });
-
-      const { data } = submitResponse.data;
-
-      console.log(`OTP submit response for ${reference}: status=${data.status}, display=${data.display_text}`);
-
-      pool.query(
-        `UPDATE transactions SET paystack_response = ?, updated_at = datetime('now') WHERE reference = ?`,
-        [JSON.stringify(data), reference]
-      );
-
-      if (data.status === 'success') {
-        pool.query(
-          `UPDATE transactions SET status = 'success', updated_at = datetime('now') WHERE reference = ?`,
-          [reference]
-        );
-      } else if (data.status === 'failed') {
-        pool.query(
-          `UPDATE transactions SET status = 'failed', updated_at = datetime('now') WHERE reference = ?`,
-          [reference]
-        );
-      }
-
-      return res.json({
-        reference,
-        status: data.status || 'pending',
-        display_text: data.display_text || data.gateway_response || 'Processing...',
-      });
-    } catch (otpError: any) {
-      // 404 means this is a phone-based charge (MoMo) — OTP is entered on device, not via API
-      // Fall back to verifying the transaction status
-      console.log(`submit_otp not applicable for ${reference} (likely phone-based MoMo), verifying instead`);
-
-      const verifyResponse = await paystackApi.get(`/transaction/verify/${reference}`);
-      const { data } = verifyResponse.data;
-
-      console.log(`Fallback verify for ${reference}: status=${data.status}, gateway=${data.gateway_response}`);
-
-      if (data.status === 'success') {
-        pool.query(
-          `UPDATE transactions SET status = 'success', paystack_response = ?, updated_at = datetime('now')
-           WHERE reference = ? AND status != 'success'`,
-          [JSON.stringify(data), reference]
-        );
-        return res.json({
-          reference,
-          status: 'success',
-          display_text: data.gateway_response || 'Payment successful!',
-        });
-      }
-
-      // Still pending — the customer needs to complete on their phone
-      return res.json({
-        reference,
-        status: data.status || 'pending',
-        display_text: 'Please complete the payment on your phone. Enter your PIN/OTP when prompted.',
-      });
-    }
-  } catch (error: any) {
-    console.error('Paystack submit_otp error:', error.response?.data || error.message);
-
-    const paystackError = error.response?.data;
-    if (paystackError) {
-      return res.status(400).json({ error: paystackError.message || 'OTP submission failed' });
-    }
-
-    res.status(500).json({ error: 'Failed to submit OTP.' });
   }
 });
 

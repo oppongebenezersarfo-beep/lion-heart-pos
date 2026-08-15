@@ -121,8 +121,6 @@ export const usersAPI = {
 export const paymentsAPI = {
   initiate: (data: { email?: string; amount?: number; phone?: string; provider?: string; sale_id?: string }) =>
     api.post('/payments/initiate', data),
-  submitOtp: (data: { reference: string; otp: string }) =>
-    api.post('/payments/submit-otp', data),
   verify: (reference: string) => api.get(`/payments/verify/${reference}`),
 };
 
