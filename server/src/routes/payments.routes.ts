@@ -27,9 +27,10 @@ function verifyPaystackSignature(req: Request): boolean {
   const signature = req.headers['x-paystack-signature'] as string;
   if (!signature) return false;
 
+  const rawBody = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
   const hash = crypto
     .createHmac('sha512', PAYSTACK_SECRET_KEY)
-    .update(req.body as Buffer)
+    .update(rawBody)
     .digest('hex');
 
   return hash === signature;
@@ -38,7 +39,7 @@ function verifyPaystackSignature(req: Request): boolean {
 // Initiate mobile money payment
 router.post('/initiate', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const { email, amount, phone, provider, sale_id } = req.body;
+    const { email, amount, phone, provider, pin, sale_id } = req.body;
 
     if (!email || !amount || !phone || !provider) {
       return res.status(400).json({ error: 'email, amount, phone, and provider are required.' });
@@ -56,6 +57,35 @@ router.post('/initiate', authenticate, async (req: AuthRequest, res: Response) =
     }
 
     const reference = generateReference();
+
+    // If PIN is provided, this is a follow-up submit_pin call
+    if (pin) {
+      try {
+        const submitPinResponse = await paystackApi.post(`/charge/${reference}/submit_pin`, {
+          pin,
+          reference,
+        });
+
+        const { data } = submitPinResponse.data;
+
+        pool.query(
+          `UPDATE transactions SET paystack_response = ?, updated_at = datetime('now') WHERE reference = ?`,
+          [JSON.stringify(data), reference]
+        );
+
+        return res.status(200).json({
+          reference,
+          status: data.status || 'pending',
+          display_text: data.display_text || 'Processing payment...',
+          gateway_response: data.gateway_response,
+        });
+      } catch (pinError: any) {
+        console.error('Paystack submit_pin error:', pinError.response?.data || pinError.message);
+        return res.status(400).json({
+          error: pinError.response?.data?.message || 'Failed to submit PIN',
+        });
+      }
+    }
 
     // Create pending transaction in database
     pool.query(
@@ -87,16 +117,30 @@ router.post('/initiate', authenticate, async (req: AuthRequest, res: Response) =
 
     const { data } = chargeResponse.data;
 
+    console.log(`Paystack charge response for ${reference}:`, JSON.stringify({
+      status: data.status,
+      display_text: data.display_text,
+      gateway_response: data.gateway_response,
+    }));
+
     // Update transaction with initial response
     pool.query(
       `UPDATE transactions SET paystack_response = ?, updated_at = datetime('now') WHERE reference = ?`,
       [JSON.stringify(data), reference]
     );
 
+    // If charge succeeded immediately (rare for MoMo)
+    if (data.status === 'success') {
+      pool.query(
+        `UPDATE transactions SET status = 'success', updated_at = datetime('now') WHERE reference = ?`,
+        [reference]
+      );
+    }
+
     res.status(201).json({
       reference,
       status: data.status || 'pending',
-      display_text: data.display_text || 'Check your phone for the payment prompt',
+      display_text: data.display_text || data.gateway_response || 'Check your phone for the payment prompt',
       authorization_url: data.authorization_url || null,
     });
   } catch (error: any) {
@@ -129,11 +173,12 @@ router.post('/webhook', async (req: Request, res: Response) => {
 
     const { event: eventType, data } = event;
 
+    console.log(`Paystack webhook: ${eventType} for ${data?.reference || 'unknown'}`);
+
     if (eventType === 'charge.success') {
       const reference = data?.reference;
       if (!reference) return res.status(200).json({ ok: true });
 
-      // Idempotent: only update if still pending
       const existing = pool.query('SELECT status FROM transactions WHERE reference = ?', [reference]);
       if (existing.rows.length > 0 && existing.rows[0].status === 'success') {
         return res.status(200).json({ ok: true });
@@ -146,7 +191,6 @@ router.post('/webhook', async (req: Request, res: Response) => {
         [JSON.stringify(data), reference]
       );
 
-      // Update linked sale if present
       const tx = pool.query('SELECT sale_id FROM transactions WHERE reference = ?', [reference]);
       if (tx.rows.length > 0 && tx.rows[0].sale_id) {
         pool.query(
@@ -160,11 +204,6 @@ router.post('/webhook', async (req: Request, res: Response) => {
     } else if (eventType === 'charge.failed') {
       const reference = data?.reference;
       if (!reference) return res.status(200).json({ ok: true });
-
-      const existing = pool.query('SELECT status FROM transactions WHERE reference = ?', [reference]);
-      if (existing.rows.length > 0 && existing.rows[0].status === 'failed') {
-        return res.status(200).json({ ok: true });
-      }
 
       pool.query(
         `UPDATE transactions
@@ -216,6 +255,8 @@ router.get('/verify/:reference', authenticate, async (req: AuthRequest, res: Res
     const verifyResponse = await paystackApi.get(`/transaction/verify/${reference}`);
     const { data } = verifyResponse.data;
 
+    console.log(`Paystack verify ${reference}: status=${data.status}, gateway=${data.gateway_response}`);
+
     if (data.status === 'success') {
       pool.query(
         `UPDATE transactions
@@ -248,6 +289,7 @@ router.get('/verify/:reference', authenticate, async (req: AuthRequest, res: Res
       phone: data.metadata?.phone,
       provider: tx.provider,
       gateway_response: data.gateway_response,
+      display_text: data.gateway_response,
       created_at: data.created_at,
     });
   } catch (error: any) {

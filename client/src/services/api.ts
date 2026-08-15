@@ -119,7 +119,7 @@ export const usersAPI = {
 
 // Payments (Paystack MoMo)
 export const paymentsAPI = {
-  initiate: (data: { email: string; amount: number; phone: string; provider: string; sale_id?: string }) =>
+  initiate: (data: { email?: string; amount?: number; phone?: string; provider?: string; sale_id?: string; pin?: string; reference?: string }) =>
     api.post('/payments/initiate', data),
   verify: (reference: string) => api.get(`/payments/verify/${reference}`),
 };
