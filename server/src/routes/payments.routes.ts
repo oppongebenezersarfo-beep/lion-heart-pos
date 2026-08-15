@@ -58,11 +58,14 @@ router.post('/initiate', authenticate, async (req: AuthRequest, res: Response) =
 
     const reference = generateReference();
 
+    // Convert local phone format (024...) to international (+233...)
+    const internationalPhone = phone.startsWith('0') ? `+233${phone.slice(1)}` : phone;
+
     // Create pending transaction in database
     pool.query(
       `INSERT INTO transactions (id, reference, email, phone, provider, amount, status, sale_id)
        VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`,
-      [crypto.randomUUID(), reference, email, phone, provider, amountInPesewas, sale_id || null]
+      [crypto.randomUUID(), reference, email, internationalPhone, provider, amountInPesewas, sale_id || null]
     );
 
     // Direct Charge API — sends USSD PIN prompt directly to customer's phone
@@ -71,7 +74,7 @@ router.post('/initiate', authenticate, async (req: AuthRequest, res: Response) =
       amount: amountInPesewas,
       currency: 'GHS',
       mobile_money: {
-        phone,
+        phone: internationalPhone,
         provider,
       },
       reference,
@@ -118,6 +121,60 @@ router.post('/initiate', authenticate, async (req: AuthRequest, res: Response) =
     }
 
     res.status(500).json({ error: 'Failed to initiate payment. Please try again.' });
+  }
+});
+
+// Submit OTP for mobile money payment
+router.post('/submit-otp', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const { reference, otp } = req.body;
+
+    if (!reference || !otp) {
+      return res.status(400).json({ error: 'reference and otp are required.' });
+    }
+
+    console.log(`Submitting OTP for ${reference}`);
+
+    const submitResponse = await paystackApi.post(`/charge/${reference}/submit_otp`, {
+      otp,
+      reference,
+    });
+
+    const { data } = submitResponse.data;
+
+    console.log(`OTP submit response for ${reference}: status=${data.status}, display=${data.display_text}`);
+
+    pool.query(
+      `UPDATE transactions SET paystack_response = ?, updated_at = datetime('now') WHERE reference = ?`,
+      [JSON.stringify(data), reference]
+    );
+
+    if (data.status === 'success') {
+      pool.query(
+        `UPDATE transactions SET status = 'success', updated_at = datetime('now') WHERE reference = ?`,
+        [reference]
+      );
+    } else if (data.status === 'failed') {
+      pool.query(
+        `UPDATE transactions SET status = 'failed', updated_at = datetime('now') WHERE reference = ?`,
+        [reference]
+      );
+    }
+
+    res.json({
+      reference,
+      status: data.status || 'pending',
+      display_text: data.display_text || data.gateway_response || 'Processing...',
+    });
+  } catch (error: any) {
+    console.error('Paystack submit_otp error:', error.response?.data || error.message);
+
+    const paystackError = error.response?.data;
+    if (paystackError) {
+      return res.status(400).json({ error: paystackError.message || 'OTP submission failed' });
+    }
+
+    res.status(500).json({ error: 'Failed to submit OTP.' });
   }
 });
 
