@@ -39,7 +39,7 @@ function verifyPaystackSignature(req: Request): boolean {
 // Initiate mobile money payment
 router.post('/initiate', authenticate, async (req: AuthRequest, res: Response) => {
   try {
-    const { email, amount, phone, provider, pin, sale_id } = req.body;
+    const { email, amount, phone, provider, sale_id } = req.body;
 
     if (!email || !amount || !phone || !provider) {
       return res.status(400).json({ error: 'email, amount, phone, and provider are required.' });
@@ -57,35 +57,6 @@ router.post('/initiate', authenticate, async (req: AuthRequest, res: Response) =
     }
 
     const reference = generateReference();
-
-    // If PIN is provided, this is a follow-up submit_pin call
-    if (pin) {
-      try {
-        const submitPinResponse = await paystackApi.post(`/charge/${reference}/submit_pin`, {
-          pin,
-          reference,
-        });
-
-        const { data } = submitPinResponse.data;
-
-        pool.query(
-          `UPDATE transactions SET paystack_response = ?, updated_at = datetime('now') WHERE reference = ?`,
-          [JSON.stringify(data), reference]
-        );
-
-        return res.status(200).json({
-          reference,
-          status: data.status || 'pending',
-          display_text: data.display_text || 'Processing payment...',
-          gateway_response: data.gateway_response,
-        });
-      } catch (pinError: any) {
-        console.error('Paystack submit_pin error:', pinError.response?.data || pinError.message);
-        return res.status(400).json({
-          error: pinError.response?.data?.message || 'Failed to submit PIN',
-        });
-      }
-    }
 
     // Create pending transaction in database
     pool.query(
@@ -117,19 +88,13 @@ router.post('/initiate', authenticate, async (req: AuthRequest, res: Response) =
 
     const { data } = chargeResponse.data;
 
-    console.log(`Paystack charge response for ${reference}:`, JSON.stringify({
-      status: data.status,
-      display_text: data.display_text,
-      gateway_response: data.gateway_response,
-    }));
+    console.log(`Paystack charge for ${reference}: status=${data.status}, display=${data.display_text}`);
 
-    // Update transaction with initial response
     pool.query(
       `UPDATE transactions SET paystack_response = ?, updated_at = datetime('now') WHERE reference = ?`,
       [JSON.stringify(data), reference]
     );
 
-    // If charge succeeded immediately (rare for MoMo)
     if (data.status === 'success') {
       pool.query(
         `UPDATE transactions SET status = 'success', updated_at = datetime('now') WHERE reference = ?`,
@@ -141,7 +106,6 @@ router.post('/initiate', authenticate, async (req: AuthRequest, res: Response) =
       reference,
       status: data.status || 'pending',
       display_text: data.display_text || data.gateway_response || 'Check your phone for the payment prompt',
-      authorization_url: data.authorization_url || null,
     });
   } catch (error: any) {
     console.error('Paystack initiate error:', error.response?.data || error.message);
@@ -156,10 +120,63 @@ router.post('/initiate', authenticate, async (req: AuthRequest, res: Response) =
   }
 });
 
-// Webhook endpoint — raw body must be parsed separately (see index.ts)
+// Submit OTP for mobile money payment
+router.post('/submit-otp', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const { reference, otp } = req.body;
+
+    if (!reference || !otp) {
+      return res.status(400).json({ error: 'reference and otp are required.' });
+    }
+
+    console.log(`Submitting OTP for ${reference}`);
+
+    const submitResponse = await paystackApi.post(`/charge/${reference}/submit_otp`, {
+      otp,
+      reference,
+    });
+
+    const { data } = submitResponse.data;
+
+    console.log(`OTP submit response for ${reference}: status=${data.status}, display=${data.display_text}`);
+
+    pool.query(
+      `UPDATE transactions SET paystack_response = ?, updated_at = datetime('now') WHERE reference = ?`,
+      [JSON.stringify(data), reference]
+    );
+
+    if (data.status === 'success') {
+      pool.query(
+        `UPDATE transactions SET status = 'success', updated_at = datetime('now') WHERE reference = ?`,
+        [reference]
+      );
+    } else if (data.status === 'failed') {
+      pool.query(
+        `UPDATE transactions SET status = 'failed', updated_at = datetime('now') WHERE reference = ?`,
+        [reference]
+      );
+    }
+
+    res.json({
+      reference,
+      status: data.status || 'pending',
+      display_text: data.display_text || data.gateway_response || 'Processing...',
+    });
+  } catch (error: any) {
+    console.error('Paystack submit_otp error:', error.response?.data || error.message);
+
+    const paystackError = error.response?.data;
+    if (paystackError) {
+      return res.status(400).json({ error: paystackError.message || 'OTP submission failed' });
+    }
+
+    res.status(500).json({ error: 'Failed to submit OTP.' });
+  }
+});
+
+// Webhook endpoint
 router.post('/webhook', async (req: Request, res: Response) => {
   try {
-    // Verify signature
     if (!verifyPaystackSignature(req)) {
       console.error('Paystack webhook: Invalid signature');
       return res.status(400).json({ error: 'Invalid signature' });
@@ -185,8 +202,7 @@ router.post('/webhook', async (req: Request, res: Response) => {
       }
 
       pool.query(
-        `UPDATE transactions
-         SET status = 'success', paystack_response = ?, updated_at = datetime('now')
+        `UPDATE transactions SET status = 'success', paystack_response = ?, updated_at = datetime('now')
          WHERE reference = ? AND status != 'success'`,
         [JSON.stringify(data), reference]
       );
@@ -206,8 +222,7 @@ router.post('/webhook', async (req: Request, res: Response) => {
       if (!reference) return res.status(200).json({ ok: true });
 
       pool.query(
-        `UPDATE transactions
-         SET status = 'failed', paystack_response = ?, updated_at = datetime('now')
+        `UPDATE transactions SET status = 'failed', paystack_response = ?, updated_at = datetime('now')
          WHERE reference = ? AND status = 'pending'`,
         [JSON.stringify(data), reference]
       );
@@ -222,7 +237,7 @@ router.post('/webhook', async (req: Request, res: Response) => {
   }
 });
 
-// Verify transaction (fallback polling endpoint)
+// Verify transaction
 router.get('/verify/:reference', authenticate, async (req: AuthRequest, res: Response) => {
   try {
     const { reference } = req.params;
@@ -238,7 +253,6 @@ router.get('/verify/:reference', authenticate, async (req: AuthRequest, res: Res
 
     const tx = localTx.rows[0];
 
-    // If already resolved, return local status
     if (tx.status === 'success' || tx.status === 'failed') {
       return res.json({
         reference: tx.reference,
@@ -251,7 +265,6 @@ router.get('/verify/:reference', authenticate, async (req: AuthRequest, res: Res
       });
     }
 
-    // Otherwise, verify with Paystack
     const verifyResponse = await paystackApi.get(`/transaction/verify/${reference}`);
     const { data } = verifyResponse.data;
 
@@ -259,8 +272,7 @@ router.get('/verify/:reference', authenticate, async (req: AuthRequest, res: Res
 
     if (data.status === 'success') {
       pool.query(
-        `UPDATE transactions
-         SET status = 'success', paystack_response = ?, updated_at = datetime('now')
+        `UPDATE transactions SET status = 'success', paystack_response = ?, updated_at = datetime('now')
          WHERE reference = ? AND status != 'success'`,
         [JSON.stringify(data), reference]
       );
@@ -272,10 +284,9 @@ router.get('/verify/:reference', authenticate, async (req: AuthRequest, res: Res
           [tx.sale_id]
         );
       }
-    } else if (data.status === 'failed') {
+    } else if (data.status === 'failed' || data.status === 'abandoned') {
       pool.query(
-        `UPDATE transactions
-         SET status = 'failed', paystack_response = ?, updated_at = datetime('now')
+        `UPDATE transactions SET status = 'failed', paystack_response = ?, updated_at = datetime('now')
          WHERE reference = ? AND status = 'pending'`,
         [JSON.stringify(data), reference]
       );

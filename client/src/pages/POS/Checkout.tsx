@@ -49,9 +49,8 @@ export default function Checkout() {
   const [momoProcessing, setMomoProcessing] = useState(false);
   const [momoStatus, setMomoStatus] = useState('');
   const [momoReference, setMomoReference] = useState('');
-  const [momoPaystackStatus, setMomoPaystackStatus] = useState('');
-  const [momoNeedsPin, setMomoNeedsPin] = useState(false);
-  const [momoPin, setMomoPin] = useState('');
+  const [momoNeedsOtp, setMomoNeedsOtp] = useState(false);
+  const [momoOtp, setMomoOtp] = useState('');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const subtotal = cart.reduce((sum, item) => sum + item.selling_price * item.quantity, 0);
@@ -66,43 +65,35 @@ export default function Checkout() {
     airteltigo: 'atl',
   };
 
-  const initiateMoMoPayment = async (pin?: string) => {
-    const phoneInput = momoPhone.trim();
-    if (!phoneInput && !pin) {
+  const initiateMoMoPayment = async () => {
+    if (!momoPhone.trim()) {
       toast.error('Enter a valid mobile money number');
       return;
     }
 
-    const phone = (pin ? '' : phoneInput).replace(/\s+/g, '');
+    const phone = momoPhone.replace(/\s+/g, '');
     const provider = providerMap[paymentMethod] || 'mtn';
 
-    if (!pin) {
-      if (!/^(024|025|026|027|028|050|053|054|055|056|057|058|020|059|052)\d{7}$/.test(phone)) {
-        toast.error('Enter a valid Ghana mobile money number (e.g. 024XXXXXXX)');
-        return;
-      }
+    if (!/^(024|025|026|027|028|050|053|054|055|056|057|058|020|059|052)\d{7}$/.test(phone)) {
+      toast.error('Enter a valid Ghana mobile money number (e.g. 024XXXXXXX)');
+      return;
     }
 
     setMomoProcessing(true);
-    setMomoStatus(pin ? 'Submitting PIN...' : 'Sending payment prompt to your phone...');
+    setMomoStatus('Sending payment prompt to your phone...');
     setMomoProvider(provider);
 
     try {
-      const payload: any = pin
-        ? { pin, reference: momoReference }
-        : { email: selectedCustomer?.email || `${phone}@pos.lionheart.com`, amount: total, phone, provider };
+      const res = await paymentsAPI.initiate({
+        email: selectedCustomer?.email || `${phone}@pos.lionheart.com`,
+        amount: total,
+        phone,
+        provider,
+      });
 
-      const res = await paymentsAPI.initiate(payload);
-
-      const { reference, status, display_text, gateway_response } = res.data;
-      const displayMsg = display_text || gateway_response || 'Processing...';
-
-      if (reference && !pin) {
-        setMomoReference(reference);
-      }
-
-      setMomoPaystackStatus(status || '');
-      setMomoStatus(displayMsg);
+      const { reference, status, display_text } = res.data;
+      setMomoReference(reference);
+      setMomoStatus(display_text || 'Processing...');
 
       if (status === 'success') {
         clearInterval(pollRef.current!);
@@ -114,35 +105,58 @@ export default function Checkout() {
         setMomoStatus('Payment failed or was cancelled.');
         toast.error('Payment was not completed.');
         setMomoProcessing(false);
-        setMomoNeedsPin(false);
-      } else if (status === 'send_pin') {
-        setMomoNeedsPin(true);
-        setMomoStatus('Enter your Mobile Money PIN to authorize the payment.');
+      } else if (status === 'send_otp') {
+        setMomoNeedsOtp(true);
+        setMomoStatus(display_text || 'An OTP has been sent to your phone. Please enter it below.');
         setMomoProcessing(false);
-      } else if (status === 'reauth') {
-        setMomoStatus('Reauthorization required. Check your phone.');
-        pollPaymentStatus(momoReference || reference);
       } else {
-        pollPaymentStatus(momoReference || reference);
+        pollPaymentStatus(reference);
       }
     } catch (err: any) {
       const msg = err.response?.data?.error || 'Failed to initiate payment. Please try again.';
       toast.error(msg);
       setMomoProcessing(false);
-      setMomoNeedsPin(false);
       setMomoStatus('');
     }
   };
 
-  const submitMomoPin = async () => {
-    if (!momoPin.trim()) {
-      toast.error('Enter your PIN');
+  const submitMomoOtp = async () => {
+    if (!momoOtp.trim()) {
+      toast.error('Enter the OTP');
       return;
     }
     setMomoProcessing(true);
-    setMomoNeedsPin(false);
-    await initiateMoMoPayment(momoPin.trim());
-    setMomoPin('');
+    setMomoNeedsOtp(false);
+    setMomoStatus('Verifying OTP...');
+
+    try {
+      const res = await paymentsAPI.submitOtp({
+        reference: momoReference,
+        otp: momoOtp.trim(),
+      });
+
+      const { status, display_text } = res.data;
+      setMomoStatus(display_text || 'Processing...');
+      setMomoOtp('');
+
+      if (status === 'success') {
+        setMomoStatus('Payment successful!');
+        toast.success('Payment confirmed!');
+        await completeSale();
+      } else if (status === 'failed') {
+        setMomoStatus('Payment failed or was cancelled.');
+        toast.error('Payment was not completed.');
+        setMomoProcessing(false);
+      } else {
+        pollPaymentStatus(momoReference);
+      }
+    } catch (err: any) {
+      const msg = err.response?.data?.error || 'OTP verification failed.';
+      toast.error(msg);
+      setMomoProcessing(false);
+      setMomoNeedsOtp(true);
+      setMomoStatus('OTP verification failed. Please try again.');
+    }
   };
 
   const pollPaymentStatus = (reference: string) => {
@@ -629,7 +643,7 @@ export default function Checkout() {
           </div>
 
           <div className="mt-auto space-y-2">
-            <button onClick={() => { if (cart.length > 0) { setPaymentMethod('cash'); setMomoPhone(''); setMomoProcessing(false); setMomoStatus(''); setMomoNeedsPin(false); setMomoPin(''); setShowPayment(true); } }}
+            <button onClick={() => { if (cart.length > 0) { setPaymentMethod('cash'); setMomoPhone(''); setMomoProcessing(false); setMomoStatus(''); setMomoNeedsOtp(false); setMomoOtp(''); setShowPayment(true); } }}
               disabled={cart.length === 0}
               className="btn-primary w-full py-4 text-lg">
               Pay {formatCedis(total)}
@@ -693,7 +707,7 @@ export default function Checkout() {
               </div>
             )}
 
-            {(paymentMethod === 'mtn_momo' || paymentMethod === 'telecel' || paymentMethod === 'airteltigo') && !momoProcessing && !momoNeedsPin && (
+            {(paymentMethod === 'mtn_momo' || paymentMethod === 'telecel' || paymentMethod === 'airteltigo') && !momoProcessing && !momoNeedsOtp && (
               <div className="space-y-3 mb-4">
                 <input type="tel" value={momoPhone} onChange={(e) => setMomoPhone(e.target.value)}
                   className="input-field text-lg" placeholder="Mobile Money number (e.g. 024XXXXXXX)" autoFocus />
@@ -708,27 +722,26 @@ export default function Checkout() {
               </div>
             )}
 
-            {(paymentMethod === 'mtn_momo' || paymentMethod === 'telecel' || paymentMethod === 'airteltigo') && momoNeedsPin && (
+            {(paymentMethod === 'mtn_momo' || paymentMethod === 'telecel' || paymentMethod === 'airteltigo') && momoNeedsOtp && (
               <div className="space-y-3 mb-4">
                 <div className="bg-yellow-900/30 border border-yellow-600 rounded-lg p-3 mb-2">
-                  <p className="text-yellow-400 text-sm font-medium">Enter your Mobile Money PIN</p>
+                  <p className="text-yellow-400 text-sm font-medium">Enter the OTP sent to your phone</p>
                   <p className="text-xs text-gray-400 mt-1">{momoStatus}</p>
                 </div>
-                <input type="password" value={momoPin} onChange={(e) => setMomoPin(e.target.value)}
-                  className="input-field text-lg" placeholder="Enter PIN" autoFocus maxLength={6} />
-                <button onClick={submitMomoPin}
+                <input type="text" value={momoOtp} onChange={(e) => setMomoOtp(e.target.value)}
+                  className="input-field text-lg text-center tracking-widest" placeholder="Enter OTP" autoFocus maxLength={8} inputMode="numeric" />
+                <button onClick={submitMomoOtp}
                   className="btn-success w-full py-3 text-lg">
-                  Submit PIN
+                  Submit OTP
                 </button>
               </div>
             )}
 
-            {(paymentMethod === 'mtn_momo' || paymentMethod === 'telecel' || paymentMethod === 'airteltigo') && momoProcessing && !momoNeedsPin && (
+            {(paymentMethod === 'mtn_momo' || paymentMethod === 'telecel' || paymentMethod === 'airteltigo') && momoProcessing && (
               <div className="space-y-3 mb-4">
                 <div className="text-center py-4">
                   <div className="animate-spin w-8 h-8 border-4 border-lion-gold border-t-transparent rounded-full mx-auto mb-3"></div>
                   <p className="text-sm text-gray-300">{momoStatus}</p>
-                  {momoPaystackStatus && <p className="text-xs text-gray-500 mt-1">Status: {momoPaystackStatus}</p>}
                   {momoReference && <p className="text-xs text-gray-500 mt-1">Ref: {momoReference}</p>}
                 </div>
               </div>
@@ -766,9 +779,9 @@ export default function Checkout() {
             )}
 
             <div className="flex gap-2">
-              <button onClick={() => { setShowPayment(false); setMomoProcessing(false); setMomoStatus(''); setMomoNeedsPin(false); }}
+              <button onClick={() => { setShowPayment(false); setMomoProcessing(false); setMomoStatus(''); setMomoNeedsOtp(false); setMomoOtp(''); }}
                 className="btn-secondary flex-1">Cancel</button>
-              {!momoNeedsPin && (
+              {!momoNeedsOtp && (
                 <button onClick={() => {
                     if (paymentMethod === 'mtn_momo' || paymentMethod === 'telecel' || paymentMethod === 'airteltigo') { initiateMoMoPayment(); }
                     else { processPayment(); }
