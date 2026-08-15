@@ -135,37 +135,69 @@ router.post('/submit-otp', authenticate, async (req: AuthRequest, res: Response)
 
     console.log(`Submitting OTP for ${reference}`);
 
-    const submitResponse = await paystackApi.post(`/charge/${reference}/submit_otp`, {
-      otp,
-      reference,
-    });
+    // Try submit_otp endpoint — if it fails, the charge is phone-based (MoMo) and OTP is entered on device
+    try {
+      const submitResponse = await paystackApi.post(`/charge/${reference}/submit_otp`, {
+        otp,
+        reference,
+      });
 
-    const { data } = submitResponse.data;
+      const { data } = submitResponse.data;
 
-    console.log(`OTP submit response for ${reference}: status=${data.status}, display=${data.display_text}`);
+      console.log(`OTP submit response for ${reference}: status=${data.status}, display=${data.display_text}`);
 
-    pool.query(
-      `UPDATE transactions SET paystack_response = ?, updated_at = datetime('now') WHERE reference = ?`,
-      [JSON.stringify(data), reference]
-    );
-
-    if (data.status === 'success') {
       pool.query(
-        `UPDATE transactions SET status = 'success', updated_at = datetime('now') WHERE reference = ?`,
-        [reference]
+        `UPDATE transactions SET paystack_response = ?, updated_at = datetime('now') WHERE reference = ?`,
+        [JSON.stringify(data), reference]
       );
-    } else if (data.status === 'failed') {
-      pool.query(
-        `UPDATE transactions SET status = 'failed', updated_at = datetime('now') WHERE reference = ?`,
-        [reference]
-      );
+
+      if (data.status === 'success') {
+        pool.query(
+          `UPDATE transactions SET status = 'success', updated_at = datetime('now') WHERE reference = ?`,
+          [reference]
+        );
+      } else if (data.status === 'failed') {
+        pool.query(
+          `UPDATE transactions SET status = 'failed', updated_at = datetime('now') WHERE reference = ?`,
+          [reference]
+        );
+      }
+
+      return res.json({
+        reference,
+        status: data.status || 'pending',
+        display_text: data.display_text || data.gateway_response || 'Processing...',
+      });
+    } catch (otpError: any) {
+      // 404 means this is a phone-based charge (MoMo) — OTP is entered on device, not via API
+      // Fall back to verifying the transaction status
+      console.log(`submit_otp not applicable for ${reference} (likely phone-based MoMo), verifying instead`);
+
+      const verifyResponse = await paystackApi.get(`/transaction/verify/${reference}`);
+      const { data } = verifyResponse.data;
+
+      console.log(`Fallback verify for ${reference}: status=${data.status}, gateway=${data.gateway_response}`);
+
+      if (data.status === 'success') {
+        pool.query(
+          `UPDATE transactions SET status = 'success', paystack_response = ?, updated_at = datetime('now')
+           WHERE reference = ? AND status != 'success'`,
+          [JSON.stringify(data), reference]
+        );
+        return res.json({
+          reference,
+          status: 'success',
+          display_text: data.gateway_response || 'Payment successful!',
+        });
+      }
+
+      // Still pending — the customer needs to complete on their phone
+      return res.json({
+        reference,
+        status: data.status || 'pending',
+        display_text: 'Please complete the payment on your phone. Enter your PIN/OTP when prompted.',
+      });
     }
-
-    res.json({
-      reference,
-      status: data.status || 'pending',
-      display_text: data.display_text || data.gateway_response || 'Processing...',
-    });
   } catch (error: any) {
     console.error('Paystack submit_otp error:', error.response?.data || error.message);
 

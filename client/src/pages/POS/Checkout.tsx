@@ -107,11 +107,10 @@ export default function Checkout() {
         setMomoStatus('Payment failed or was cancelled.');
         toast.error('Payment was not completed.');
         setMomoProcessing(false);
-      } else if (status === 'send_otp') {
-        setMomoNeedsOtp(true);
-        setMomoStatus(display_text || 'An OTP has been sent to your phone. Please enter it below.');
-        setMomoProcessing(false);
       } else {
+        // For send_otp or any other pending status — the customer enters PIN on their phone
+        setMomoProcessing(true);
+        setMomoStatus(display_text || 'Please enter your PIN on your phone when prompted...');
         pollPaymentStatus(reference);
       }
     } catch (err: any) {
@@ -724,21 +723,6 @@ export default function Checkout() {
               </div>
             )}
 
-            {(paymentMethod === 'mtn_momo' || paymentMethod === 'telecel' || paymentMethod === 'airteltigo') && momoNeedsOtp && (
-              <div className="space-y-3 mb-4">
-                <div className="bg-yellow-900/30 border border-yellow-600 rounded-lg p-3 mb-2">
-                  <p className="text-yellow-400 text-sm font-medium">Enter the OTP sent to your phone</p>
-                  <p className="text-xs text-gray-400 mt-1">{momoStatus}</p>
-                </div>
-                <input type="text" value={momoOtp} onChange={(e) => setMomoOtp(e.target.value)}
-                  className="input-field text-lg text-center tracking-widest" placeholder="Enter OTP" autoFocus maxLength={8} inputMode="numeric" />
-                <button onClick={submitMomoOtp}
-                  className="btn-success w-full py-3 text-lg">
-                  Submit OTP
-                </button>
-              </div>
-            )}
-
             {(paymentMethod === 'mtn_momo' || paymentMethod === 'telecel' || paymentMethod === 'airteltigo') && momoProcessing && (
               <div className="space-y-3 mb-4">
                 <div className="text-center py-4">
@@ -783,7 +767,6 @@ export default function Checkout() {
             <div className="flex gap-2">
               <button onClick={() => { setShowPayment(false); setMomoProcessing(false); setMomoStatus(''); setMomoNeedsOtp(false); setMomoOtp(''); }}
                 className="btn-secondary flex-1">Cancel</button>
-              {!momoNeedsOtp && (
                 <button onClick={() => {
                     if (paymentMethod === 'mtn_momo' || paymentMethod === 'telecel' || paymentMethod === 'airteltigo') { initiateMoMoPayment(); }
                     else { processPayment(); }
@@ -792,7 +775,6 @@ export default function Checkout() {
                   className="btn-success flex-1 py-3">
                   {momoProcessing ? 'Processing...' : paymentMethod === 'credit' ? 'Confirm Credit Sale' : 'Confirm Payment'}
                 </button>
-              )}
             </div>
           </div>
         </div>
