@@ -2,9 +2,12 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import { mkdirSync, readFileSync, existsSync } from 'fs';
 
-const dbPath = path.join(__dirname, '../../data/lion_heart.db');
+// Use DB_PATH env var for persistent storage (Railway volume), or default to local path
+const dbPath = process.env.DB_PATH || path.join(__dirname, '../../data/lion_heart.db');
 const dbDir = path.dirname(dbPath);
 mkdirSync(dbDir, { recursive: true });
+
+console.log(`Database path: ${dbPath}`);
 
 const sqliteDb = new Database(dbPath);
 sqliteDb.pragma('journal_mode = WAL');
@@ -38,6 +41,18 @@ if (existsSync(txMigrationPath)) {
       console.log('Adding access_code column to transactions...');
       sqliteDb.exec("ALTER TABLE transactions ADD COLUMN access_code TEXT");
     }
+  }
+}
+
+// Auto-run price_history migration
+const priceHistoryPath = path.join(__dirname, '../../migrations/003_price_history.sql');
+if (existsSync(priceHistoryPath)) {
+  const phCheck = sqliteDb.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='price_history'").get();
+  if (!phCheck) {
+    console.log('Running price_history migration...');
+    const phMigration = readFileSync(priceHistoryPath, 'utf8');
+    sqliteDb.exec(phMigration);
+    console.log('Price history migration complete');
   }
 }
 

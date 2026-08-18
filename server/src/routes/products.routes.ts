@@ -6,6 +6,25 @@ import { requireRole } from '../middleware/role';
 
 const router = Router();
 
+// Get price history
+router.get('/price-history', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const { product_id } = req.query;
+    let query = 'SELECT ph.*, u.username as changed_by_name FROM price_history ph LEFT JOIN users u ON ph.changed_by = u.id';
+    const params: any[] = [];
+    if (product_id) {
+      query += ' WHERE ph.product_id = ?';
+      params.push(product_id);
+    }
+    query += ' ORDER BY ph.created_at DESC LIMIT 200';
+    const result = pool.query(query, params);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Get price history error:', error);
+    res.status(500).json({ error: 'Internal server error.' });
+  }
+});
+
 // Get all products
 router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
   try {
@@ -156,6 +175,13 @@ router.put('/:id', authenticate, requireRole('admin', 'manager'), async (req: Au
       unit_of_measure, cost_price, selling_price, current_stock, reorder_level, is_active
     } = req.body;
 
+    // Fetch current product to detect price changes
+    const existing = pool.query('SELECT * FROM products WHERE id = ?', [id]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Product not found.' });
+    }
+    const oldProduct = existing.rows[0];
+
     pool.query(
       `UPDATE products SET
         sku = COALESCE(?, sku),
@@ -177,12 +203,22 @@ router.put('/:id', authenticate, requireRole('admin', 'manager'), async (req: Au
        unit_of_measure || null, cost_price, selling_price, current_stock, reorder_level, is_active, id]
     );
 
-    const result = pool.query('SELECT * FROM products WHERE id = ?', [id]);
+    // Log price changes to price_history
+    const newCost = cost_price !== undefined ? cost_price : oldProduct.cost_price;
+    const newSelling = selling_price !== undefined ? selling_price : oldProduct.selling_price;
+    const costChanged = cost_price !== undefined && cost_price !== oldProduct.cost_price;
+    const sellingChanged = selling_price !== undefined && selling_price !== oldProduct.selling_price;
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Product not found.' });
+    if (costChanged || sellingChanged) {
+      pool.query(
+        `INSERT INTO price_history (product_id, product_name, old_cost_price, new_cost_price, old_selling_price, new_selling_price, changed_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [id, oldProduct.name, oldProduct.cost_price, newCost, oldProduct.selling_price, newSelling, req.user!.id]
+      );
+      console.log(`Price changed for ${oldProduct.name}: cost ${oldProduct.cost_price} -> ${newCost}, selling ${oldProduct.selling_price} -> ${newSelling}`);
     }
 
+    const result = pool.query('SELECT * FROM products WHERE id = ?', [id]);
     res.json(result.rows[0]);
   } catch (error: any) {
     if (error.message?.includes('UNIQUE')) {
