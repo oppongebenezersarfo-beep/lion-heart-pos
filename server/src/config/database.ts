@@ -58,16 +58,23 @@ if (existsSync(priceHistoryPath)) {
   }
 }
 
-// Auto-seed default admin user if no users exist
-const userCount = sqliteDb.prepare("SELECT COUNT(*) as count FROM users").get() as any;
-if (userCount && userCount.count === 0) {
-  console.log('No users found — seeding default admin user...');
+// Auto-seed default admin user — always verify password hash is correct
+const adminUser = sqliteDb.prepare("SELECT id, password_hash FROM users WHERE username = 'admin'").get() as any;
+if (!adminUser) {
+  console.log('No admin user found — seeding default admin user...');
   const id = crypto.randomUUID();
   const passwordHash = bcrypt.hashSync('admin123', 10);
   sqliteDb.prepare(
     "INSERT INTO users (id, username, password_hash, full_name, role, pin) VALUES (?, ?, ?, ?, ?, ?)"
   ).run(id, 'admin', passwordHash, 'System Admin', 'admin', '1234');
   console.log('Default admin user created: admin / admin123 (PIN: 1234)');
+} else if (!bcrypt.compareSync('admin123', adminUser.password_hash)) {
+  console.log('Admin password hash is wrong — resetting to admin123...');
+  const passwordHash = bcrypt.hashSync('admin123', 10);
+  sqliteDb.prepare("UPDATE users SET password_hash = ? WHERE username = 'admin'").run(passwordHash);
+  console.log('Admin password reset to admin123');
+} else {
+  console.log('Admin user OK');
 }
 
 function transformSQL(sql: string): string {

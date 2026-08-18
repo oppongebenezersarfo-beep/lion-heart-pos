@@ -165,12 +165,7 @@ CREATE INDEX IF NOT EXISTS idx_shifts_cashier ON shifts(cashier_id);
 CREATE INDEX IF NOT EXISTS idx_shifts_status ON shifts(status);
 CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id);
 
--- Seed default users (password: admin123)
-INSERT OR IGNORE INTO users (id, username, password_hash, full_name, role, pin) VALUES
-('admin001', 'admin', '$2a$10$SEkfTwMa2BlLNrEXpt9n8.97U5YHECKhgEl/6K/o4IhsRLYqTObQe', 'System Administrator', 'admin', '1234'),
-('mgr001', 'manager', '$2a$10$SEkfTwMa2BlLNrEXpt9n8.97U5YHECKhgEl/6K/o4IhsRLYqTObQe', 'Store Manager', 'manager', '5678'),
-('csr001', 'cashier1', '$2a$10$SEkfTwMa2BlLNrEXpt9n8.97U5YHECKhgEl/6K/o4IhsRLYqTObQe', 'Ama Cashier', 'cashier', NULL),
-('csr002', 'cashier2', '$2a$10$SEkfTwMa2BlLNrEXpt9n8.97U5YHECKhgEl/6K/o4IhsRLYqTObQe', 'Kofi Cashier', 'cashier', NULL);
+-- Seed default users (password: admin123) — hash will be fixed by database.ts on startup
 
 -- Seed default categories
 INSERT OR IGNORE INTO categories (id, name, description) VALUES
