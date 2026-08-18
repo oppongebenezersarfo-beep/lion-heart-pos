@@ -16,6 +16,7 @@ import ShiftManager from './pages/Shifts/ShiftManager';
 import UserManagement from './pages/Settings/UserManagement';
 import Returns from './pages/Sales/Returns';
 import OfflineSalesQueue from './pages/Sales/OfflineSalesQueue';
+import AuditLog from './pages/Settings/AuditLog';
 
 function ProtectedRoute({ children, roles }: { children: React.ReactNode; roles?: string[] }) {
   const { user } = useAuth();
@@ -76,6 +77,11 @@ function AppRoutes() {
         <Route path="/settings" element={
           <ProtectedRoute roles={['admin']}>
             <UserManagement />
+          </ProtectedRoute>
+        } />
+        <Route path="/audit-log" element={
+          <ProtectedRoute roles={['admin', 'manager']}>
+            <AuditLog />
           </ProtectedRoute>
         } />
       <Route path="/returns" element={

@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import pool from '../config/database';
 import { config } from '../config/env';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { logAudit } from '../utils/audit';
 
 const router = Router();
 
@@ -19,6 +20,7 @@ router.post('/login', async (req: Request, res: Response) => {
     const result = pool.query('SELECT * FROM users WHERE username = ? AND is_active = 1', [username]);
 
     if (result.rows.length === 0) {
+      logAudit({ action: 'login_failed', details: { username, reason: 'user_not_found' }, ipAddress: req.ip });
       return res.status(401).json({ error: 'Invalid credentials.' });
     }
 
@@ -26,6 +28,7 @@ router.post('/login', async (req: Request, res: Response) => {
     const validPassword = await bcrypt.compare(password, user.password_hash);
 
     if (!validPassword) {
+      logAudit({ userId: user.id, action: 'login_failed', details: { username, reason: 'wrong_password' }, ipAddress: req.ip });
       return res.status(401).json({ error: 'Invalid credentials.' });
     }
 
@@ -34,6 +37,8 @@ router.post('/login', async (req: Request, res: Response) => {
       config.jwtSecret,
       { expiresIn: '8h' }
     );
+
+    logAudit({ userId: user.id, action: 'login_success', details: { username, role: user.role }, ipAddress: req.ip });
 
     res.json({
       token,
@@ -89,10 +94,7 @@ router.post('/verify-pin', authenticate, async (req: AuthRequest, res: Response)
 
     const approver = result.rows[0];
 
-    pool.query(
-      'INSERT INTO audit_log (user_id, action, details) VALUES (?, ?, ?)',
-      [req.user!.id, 'pin_verification', JSON.stringify({ approverId: approver.id, action })]
-    );
+    logAudit({ userId: req.user!.id, action: 'pin_verification', details: { approverId: approver.id, approverName: approver.full_name, action } });
 
     res.json({
       valid: true,

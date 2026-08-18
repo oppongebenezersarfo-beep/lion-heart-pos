@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import pool from '../config/database';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireRole } from '../middleware/role';
+import { logAudit } from '../utils/audit';
 
 const router = Router();
 
@@ -13,6 +14,7 @@ router.post('/start', authenticate, async (req: AuthRequest, res: Response) => {
     if (existing.rows.length > 0) return res.status(400).json({ error: 'You already have an open shift.' });
     const id = crypto.randomUUID();
     pool.query('INSERT INTO shifts (id, cashier_id, opening_cash, status) VALUES (?, ?, ?, \'open\')', [id, req.user!.id, opening_cash || 0]);
+    logAudit({ userId: req.user!.id, action: 'shift_started', details: { shiftId: id, openingCash: opening_cash || 0 } });
     res.status(201).json(pool.query('SELECT * FROM shifts WHERE id = ?', [id]).rows[0]);
   } catch (error) { console.error(error); res.status(500).json({ error: 'Internal server error.' }); }
 });
@@ -39,7 +41,7 @@ router.post('/:id/close', authenticate, async (req: AuthRequest, res: Response) 
     const expectedCash = parseFloat(shift.opening_cash) + parseFloat(cashSales.rows[0].cash_total);
     const difference = parseFloat(closing_cash) - expectedCash;
     pool.query('UPDATE shifts SET end_time=datetime(\'now\'), closing_cash=?, expected_cash=?, difference=?, status=\'closed\' WHERE id=?', [closing_cash, expectedCash, difference, id]);
-    pool.query('INSERT INTO audit_log (user_id, action, details) VALUES (?, ?, ?)', [req.user!.id, 'shift_closed', JSON.stringify({ shiftId: id, openingCash: shift.opening_cash, closingCash: closing_cash, expectedCash, difference })]);
+    logAudit({ userId: req.user!.id, action: 'shift_closed', details: { shiftId: id, openingCash: shift.opening_cash, closingCash: closing_cash, expectedCash, difference } });
     res.json(pool.query('SELECT * FROM shifts WHERE id = ?', [id]).rows[0]);
   } catch (error) { console.error(error); res.status(500).json({ error: 'Internal server error.' }); }
 });

@@ -16,6 +16,7 @@ import shiftsRoutes from './routes/shifts.routes';
 import syncRoutes from './routes/sync.routes';
 import usersRoutes from './routes/users.routes';
 import paymentsRoutes from './routes/payments.routes';
+import auditRoutes from './routes/audit.routes';
 
 dotenv.config();
 
@@ -65,6 +66,7 @@ app.use('/api/shifts', shiftsRoutes);
 app.use('/api/sync', syncRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/payments', paymentsRoutes);
+app.use('/api/audit-log', auditRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

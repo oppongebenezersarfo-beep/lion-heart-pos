@@ -14,6 +14,7 @@ import {
   HiOutlineArrowRightOnRectangle,
   HiOutlineArrowUturnLeft,
   HiOutlineArrowPath,
+  HiOutlineClipboardDocumentList,
 } from 'react-icons/hi2';
 
 interface LayoutProps {
@@ -33,6 +34,7 @@ const navItems = [
   { path: '/offline-queue', label: 'Offline Queue', icon: HiOutlineArrowPath, roles: ['admin', 'manager'] },
   { path: '/shifts', label: 'Shifts', icon: HiOutlineClock, roles: ['admin', 'manager', 'cashier'] },
   { path: '/settings', label: 'Settings', icon: HiOutlineCog, roles: ['admin'] },
+  { path: '/audit-log', label: 'Audit Trail', icon: HiOutlineClipboardDocumentList, roles: ['admin', 'manager'] },
 ];
 
 export default function Layout({ children, pendingSyncCount = 0 }: LayoutProps) {

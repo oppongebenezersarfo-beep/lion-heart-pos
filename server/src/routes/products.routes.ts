@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import pool from '../config/database';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireRole } from '../middleware/role';
+import { logAudit } from '../utils/audit';
 
 const router = Router();
 
@@ -151,10 +152,7 @@ router.post('/', authenticate, requireRole('admin', 'manager'), async (req: Auth
 
     const result = pool.query('SELECT * FROM products WHERE id = ?', [id]);
 
-    pool.query(
-      'INSERT INTO audit_log (user_id, action, details) VALUES (?, ?, ?)',
-      [req.user!.id, 'product_created', JSON.stringify({ productId: id, name })]
-    );
+    logAudit({ userId: req.user!.id, action: 'product_created', details: { productId: id, name } });
 
     res.status(201).json(result.rows[0]);
   } catch (error: any) {
@@ -218,6 +216,8 @@ router.put('/:id', authenticate, requireRole('admin', 'manager'), async (req: Au
       console.log(`Price changed for ${oldProduct.name}: cost ${oldProduct.cost_price} -> ${newCost}, selling ${oldProduct.selling_price} -> ${newSelling}`);
     }
 
+    logAudit({ userId: req.user!.id, action: 'product_updated', details: { productId: id, name: oldProduct.name, costPrice: newCost, sellingPrice: newSelling } });
+
     const result = pool.query('SELECT * FROM products WHERE id = ?', [id]);
     res.json(result.rows[0]);
   } catch (error: any) {
@@ -264,9 +264,11 @@ router.delete('/:id', authenticate, requireRole('admin'), async (req: AuthReques
     const salesItems = pool.query('SELECT COUNT(*) as count FROM sale_items WHERE product_id = ?', [id]);
     if (salesItems.rows[0].count > 0) {
       pool.query('UPDATE products SET is_active = 0 WHERE id = ?', [id]);
+      logAudit({ userId: req.user!.id, action: 'product_deactivated', details: { productId: id, name: product.rows[0].name } });
       return res.json({ message: 'Product deactivated (has sales history).' });
     }
     pool.query('DELETE FROM products WHERE id = ?', [id]);
+    logAudit({ userId: req.user!.id, action: 'product_deleted', details: { productId: id, name: product.rows[0].name } });
     res.json({ message: 'Product deleted.' });
   } catch (error) { console.error(error); res.status(500).json({ error: 'Internal server error.' }); }
 });
@@ -282,8 +284,7 @@ router.post('/:id/adjust-stock', authenticate, requireRole('admin', 'manager'), 
     const newStock = product.rows[0].current_stock + adjustment;
     if (newStock < 0) return res.status(400).json({ error: 'Stock cannot be negative.' });
     pool.query('UPDATE products SET current_stock = ?, updated_at = datetime(\'now\') WHERE id = ?', [newStock, id]);
-    pool.query('INSERT INTO audit_log (user_id, action, details) VALUES (?, ?, ?)',
-      [req.user!.id, 'stock_adjustment', JSON.stringify({ productId: id, adjustment, reason, newStock })]);
+    logAudit({ userId: req.user!.id, action: 'stock_adjustment', details: { productId: id, name: product.rows[0].name, adjustment, reason, newStock } });
     res.json({ message: 'Stock adjusted.', newStock });
   } catch (error) { console.error(error); res.status(500).json({ error: 'Internal server error.' }); }
 });

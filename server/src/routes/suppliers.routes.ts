@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import pool from '../config/database';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireRole } from '../middleware/role';
+import { logAudit } from '../utils/audit';
 
 const router = Router();
 
@@ -32,6 +33,7 @@ router.post('/', authenticate, requireRole('admin', 'manager'), async (req: Auth
     const id = crypto.randomUUID();
     pool.query('INSERT INTO suppliers (id, name, contact_person, phone, email, address) VALUES (?, ?, ?, ?, ?, ?)',
       [id, name, contact_person || null, phone || null, email || null, address || null]);
+    logAudit({ userId: req.user!.id, action: 'supplier_created', details: { supplierId: id, name } });
     res.status(201).json(pool.query('SELECT * FROM suppliers WHERE id = ?', [id]).rows[0]);
   } catch (error) { console.error(error); res.status(500).json({ error: 'Internal server error.' }); }
 });
@@ -44,6 +46,7 @@ router.put('/:id', authenticate, requireRole('admin', 'manager'), async (req: Au
       [name, contact_person, phone, email, address, id]);
     const result = pool.query('SELECT * FROM suppliers WHERE id = ?', [id]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Supplier not found.' });
+    logAudit({ userId: req.user!.id, action: 'supplier_updated', details: { supplierId: id, name: result.rows[0].name, changes: req.body } });
     res.json(result.rows[0]);
   } catch (error) { console.error(error); res.status(500).json({ error: 'Internal server error.' }); }
 });
@@ -56,6 +59,7 @@ router.delete('/:id', authenticate, requireRole('admin'), async (req: AuthReques
     const products = pool.query('SELECT COUNT(*) as count FROM products WHERE supplier_id = ?', [id]);
     if (products.rows[0].count > 0) return res.status(400).json({ error: 'Cannot delete supplier with products.' });
     pool.query('DELETE FROM suppliers WHERE id = ?', [id]);
+    logAudit({ userId: req.user!.id, action: 'supplier_deleted', details: { supplierId: id, name: supplier.rows[0].name } });
     res.json({ message: 'Supplier deleted.' });
   } catch (error) { console.error(error); res.status(500).json({ error: 'Internal server error.' }); }
 });

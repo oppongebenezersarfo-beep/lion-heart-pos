@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import pool from '../config/database';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireRole } from '../middleware/role';
+import { logAudit } from '../utils/audit';
 
 const router = Router();
 
@@ -32,6 +33,7 @@ router.post('/', authenticate, requireRole('admin', 'manager'), async (req: Auth
     const id = crypto.randomUUID();
     pool.query('INSERT INTO customers (id, name, phone, email, address, credit_limit, credit_terms_days, is_credit_approved) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       [id, name, phone || null, email || null, address || null, credit_limit || 0, credit_terms_days || 30, is_credit_approved ? 1 : 0]);
+    logAudit({ userId: req.user!.id, action: 'customer_created', details: { customerId: id, name, phone } });
     res.status(201).json(pool.query('SELECT * FROM customers WHERE id = ?', [id]).rows[0]);
   } catch (error) { console.error(error); res.status(500).json({ error: 'Internal server error.' }); }
 });
@@ -62,6 +64,7 @@ router.put('/:id', authenticate, requireRole('admin', 'manager'), async (req: Au
     pool.query(`UPDATE customers SET ${fields.join(', ')} WHERE id = ?`, params);
     const result = pool.query('SELECT * FROM customers WHERE id = ?', [id]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Customer not found.' });
+    logAudit({ userId: req.user!.id, action: 'customer_updated', details: { customerId: id, name: result.rows[0].name, changes: req.body } });
     res.json(result.rows[0]);
   } catch (error) { console.error(error); res.status(500).json({ error: 'Internal server error.' }); }
 });
@@ -82,8 +85,7 @@ router.post('/:id/payments', authenticate, requireRole('admin', 'manager'), asyn
     if (customer.rows.length === 0) return res.status(404).json({ error: 'Customer not found.' });
     if (customer.rows[0].outstanding_balance < amount) return res.status(400).json({ error: 'Payment exceeds outstanding balance.' });
     pool.query('UPDATE customers SET outstanding_balance = outstanding_balance - ? WHERE id = ?', [amount, id]);
-    pool.query('INSERT INTO audit_log (user_id, action, details) VALUES (?, ?, ?)',
-      [req.user!.id, 'customer_payment', JSON.stringify({ customerId: id, amount, paymentMethod: payment_method, notes })]);
+    logAudit({ userId: req.user!.id, action: 'customer_payment', details: { customerId: id, amount, paymentMethod: payment_method, notes } });
     res.json({ message: 'Payment recorded.', newBalance: customer.rows[0].outstanding_balance - amount });
   } catch (error) { console.error(error); res.status(500).json({ error: 'Internal server error.' }); }
 });
@@ -96,6 +98,7 @@ router.delete('/:id', authenticate, requireRole('admin'), async (req: AuthReques
     const sales = pool.query('SELECT COUNT(*) as count FROM sales WHERE customer_id = ?', [id]);
     if (sales.rows[0].count > 0) return res.status(400).json({ error: 'Cannot delete customer with sales history.' });
     pool.query('DELETE FROM customers WHERE id = ?', [id]);
+    logAudit({ userId: req.user!.id, action: 'customer_deleted', details: { customerId: id, name: customer.rows[0].name } });
     res.json({ message: 'Customer deleted.' });
   } catch (error) { console.error(error); res.status(500).json({ error: 'Internal server error.' }); }
 });

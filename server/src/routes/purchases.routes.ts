@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import pool from '../config/database';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireRole } from '../middleware/role';
+import { logAudit } from '../utils/audit';
 
 const router = Router();
 
@@ -47,6 +48,7 @@ router.post('/', authenticate, requireRole('admin', 'manager'), async (req: Auth
       pool.query('INSERT INTO purchase_items (id, purchase_order_id, product_id, quantity, unit_cost) VALUES (?, ?, ?, ?, ?)',
         [crypto.randomUUID(), poId, item.product_id, item.quantity, item.unit_cost]);
     }
+    logAudit({ userId: req.user!.id, action: 'purchase_order_created', details: { purchaseOrderId: poId, order_number, supplier_id, total, itemCount: items.length } });
     res.status(201).json(pool.query('SELECT * FROM purchase_orders WHERE id = ?', [poId]).rows[0]);
   } catch (error) { console.error(error); res.status(500).json({ error: 'Internal server error.' }); }
 });
@@ -64,8 +66,7 @@ router.post('/:id/receive', authenticate, requireRole('admin', 'manager'), async
         [crypto.randomUUID(), item.product_id, item.received_quantity, id, req.user!.id]);
     }
     pool.query("UPDATE purchase_orders SET status = 'received', received_at = datetime('now') WHERE id = ?", [id]);
-    pool.query('INSERT INTO audit_log (user_id, action, details) VALUES (?, ?, ?)',
-      [req.user!.id, 'purchase_received', JSON.stringify({ purchaseOrderId: id })]);
+    logAudit({ userId: req.user!.id, action: 'purchase_received', details: { purchaseOrderId: id, receivedItems: received_items.length } });
     res.json({ message: 'Goods received and stock updated.' });
   } catch (error) { console.error(error); res.status(500).json({ error: 'Internal server error.' }); }
 });

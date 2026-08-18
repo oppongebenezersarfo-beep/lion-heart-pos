@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import pool from '../config/database';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { requireRole } from '../middleware/role';
+import { logAudit } from '../utils/audit';
 
 const router = Router();
 
@@ -129,12 +130,7 @@ router.post('/', authenticate, async (req: AuthRequest, res: Response) => {
         );
       }
 
-      pool.query(
-        'INSERT INTO audit_log (user_id, action, details) VALUES (?, ?, ?)',
-        [req.user!.id, 'sale_created', JSON.stringify({
-          saleId, invoiceNumber: invoice_number, total, paymentMethod: payment_method, isOffline: is_offline_sale
-        })]
-      );
+      logAudit({ userId: req.user!.id, action: 'sale_created', details: { saleId, invoiceNumber: invoice_number, total, paymentMethod: payment_method, isOffline: is_offline_sale } });
 
       return { saleId, invoice_number };
     });
@@ -240,10 +236,7 @@ router.post('/:id/return', authenticate, requireRole('admin', 'manager'), async 
       }
 
       pool.query("UPDATE sales SET status = 'returned' WHERE id = ?", [id]);
-      pool.query(
-        'INSERT INTO audit_log (user_id, action, details) VALUES (?, ?, ?)',
-        [req.user!.id, 'sale_returned', JSON.stringify({ saleId: id, refundTotal, reason })]
-      );
+      logAudit({ userId: req.user!.id, action: 'sale_returned', details: { saleId: id, refundTotal, reason } });
 
       return refundTotal;
     });
