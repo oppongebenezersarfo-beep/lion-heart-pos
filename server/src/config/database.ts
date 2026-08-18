@@ -1,6 +1,8 @@
 import Database from 'better-sqlite3';
 import path from 'path';
+import crypto from 'crypto';
 import { mkdirSync, readFileSync, existsSync } from 'fs';
+import bcrypt from 'bcryptjs';
 
 // Use DB_PATH env var for persistent storage (Railway volume), or default to local path
 const dbPath = process.env.DB_PATH || path.join(__dirname, '../../data/lion_heart.db');
@@ -54,6 +56,18 @@ if (existsSync(priceHistoryPath)) {
     sqliteDb.exec(phMigration);
     console.log('Price history migration complete');
   }
+}
+
+// Auto-seed default admin user if no users exist
+const userCount = sqliteDb.prepare("SELECT COUNT(*) as count FROM users").get() as any;
+if (userCount && userCount.count === 0) {
+  console.log('No users found — seeding default admin user...');
+  const id = crypto.randomUUID();
+  const passwordHash = bcrypt.hashSync('admin123', 10);
+  sqliteDb.prepare(
+    "INSERT INTO users (id, username, password_hash, full_name, role, pin) VALUES (?, ?, ?, ?, ?, ?)"
+  ).run(id, 'admin', passwordHash, 'System Admin', 'admin', '1234');
+  console.log('Default admin user created: admin / admin123 (PIN: 1234)');
 }
 
 function transformSQL(sql: string): string {
