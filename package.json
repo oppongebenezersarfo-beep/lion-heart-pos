@@ -12,5 +12,8 @@
     "dev": "cd server && npm run dev",
     "seed": "cd server && node seed-demo.js",
     "postinstall": "cd server && npm install && cd ../client && npm install"
+  },
+  "devDependencies": {
+    "sharp": "^0.35.3"
   }
 }
