@@ -7,44 +7,38 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['vite.svg', 'favicon.ico'],
+      includeAssets: ['icon.svg', 'favicon.ico'],
       manifest: {
-        name: 'Lion Heart POS',
-        short_name: 'Lion POS',
-        description: 'Point of Sale for Lion Heart Hardware',
+        name: 'Lion Heart Hardware - POS',
+        short_name: 'Lion Heart POS',
+        description: 'Point of Sale System for Lion Heart Hardware',
         theme_color: '#b8860b',
         background_color: '#111827',
         display: 'standalone',
+        orientation: 'any',
+        scope: '/',
+        start_url: '/',
+        categories: ['business', 'finance'],
         icons: [
-          { src: '/vite.svg', sizes: '192x192', type: 'image/svg+xml' },
-          { src: '/vite.svg', sizes: '512x512', type: 'image/svg+xml' },
+          { src: '/icon.svg', sizes: '192x192', type: 'image/svg+xml' },
+          { src: '/icon.svg', sizes: '512x512', type: 'image/svg+xml' },
+          { src: '/icon.svg', sizes: '512x512', type: 'image/svg+xml', purpose: 'maskable' },
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,woff,woff2}'],
+        globPatterns: ['**/*.{js,css,html,svg,woff,woff2,png,ico}'],
+        skipWaiting: true,
+        clientsClaim: true,
+        navigateFallback: '/index.html',
+        navigateFallbackDenylist: [/^\/api/],
         runtimeCaching: [
-          {
-            urlPattern: /^https?:\/\/.*\/api\/products.*/,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api-products',
-              expiration: { maxEntries: 1, maxAgeSeconds: 60 * 60 * 24 },
-            },
-          },
-          {
-            urlPattern: /^https?:\/\/.*\/api\/customers.*/,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api-customers',
-              expiration: { maxEntries: 1, maxAgeSeconds: 60 * 60 * 24 },
-            },
-          },
           {
             urlPattern: /^https?:\/\/.*\/api\/.*/,
             handler: 'NetworkFirst',
             options: {
               cacheName: 'api-cache',
-              expiration: { maxEntries: 50, maxAgeSeconds: 60 * 60 },
+              networkTimeoutSeconds: 5,
+              expiration: { maxEntries: 100, maxAgeSeconds: 60 * 5 },
             },
           },
         ],
