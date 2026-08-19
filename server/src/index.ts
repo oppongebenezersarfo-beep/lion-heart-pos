@@ -4,6 +4,7 @@ import path from 'path';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 import { config } from './config/env';
+import pool from './config/database';
 import { errorHandler } from './middleware/errorHandler';
 import authRoutes from './routes/auth.routes';
 import productsRoutes from './routes/products.routes';
@@ -71,6 +72,36 @@ app.use('/api/audit-log', auditRoutes);
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Debug: check DB state (remove after fixing)
+app.get('/api/debug', (req, res) => {
+  try {
+    const bcrypt = require('bcryptjs');
+    const dbPath = process.env.DB_PATH || 'not set';
+    const result = pool.query("SELECT id, username, full_name, role FROM users", []);
+    const userCount = result.rows.length;
+    const adminUser = result.rows.find((u: any) => u.username === 'admin');
+    
+    let hashStatus = 'not found';
+    if (adminUser) {
+      const adminFull = pool.query("SELECT password_hash FROM users WHERE username = 'admin'", []);
+      const hash = adminFull.rows[0]?.password_hash;
+      if (hash) {
+        hashStatus = bcrypt.compareSync('admin123', hash) ? 'VALID' : 'WRONG';
+      }
+    }
+
+    res.json({
+      dbPath,
+      userCount,
+      adminUser: adminUser ? { id: adminUser.id, username: adminUser.username } : null,
+      hashStatus,
+      envDbPath: process.env.DB_PATH,
+    });
+  } catch (err: any) {
+    res.json({ error: err.message });
+  }
 });
 
 // Serve frontend in production
