@@ -28,8 +28,14 @@ api.interceptors.response.use(
 
 // Auth
 export const authAPI = {
-  login: (username: string, password: string) =>
-    api.post('/auth/login', { username, password }),
+  login: (username: string, password: string) => {
+    const params = new URLSearchParams();
+    params.append('username', username);
+    params.append('password', password);
+    return api.post('/auth/login', params, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    });
+  },
   getMe: () => api.get('/auth/me'),
   verifyPin: (pin: string, action: string) =>
     api.post('/auth/verify-pin', { pin, action }),

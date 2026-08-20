@@ -54,6 +54,7 @@ app.post('/api/payments/webhook', express.raw({ type: 'application/json' }), (re
 
 // All other routes use JSON body parsing
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Routes
 app.use('/api/auth', authRoutes);
