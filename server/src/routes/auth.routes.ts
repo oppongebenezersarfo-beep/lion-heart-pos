@@ -8,10 +8,24 @@ import { logAudit } from '../utils/audit';
 
 const router = Router();
 
-// Login
-router.post('/login', async (req: Request, res: Response) => {
+// Login — supports both POST JSON and GET query params (Cloudflare bypass)
+router.post('/login', handleLogin);
+router.get('/login', handleLogin);
+
+async function handleLogin(req: Request, res: Response) {
   try {
-    const { username, password } = req.body;
+    let username: string | undefined;
+    let password: string | undefined;
+
+    if (req.method === 'GET') {
+      username = req.query.username as string;
+      password = req.query.password as string;
+    } else {
+      username = req.body?.username;
+      password = req.body?.password;
+    }
+
+    console.log(`Login attempt: username=${username}, method=${req.method}, body=${JSON.stringify(req.body)}, query=${JSON.stringify(req.query)}`);
 
     if (!username || !password) {
       return res.status(400).json({ error: 'Username and password are required.' });
@@ -21,6 +35,7 @@ router.post('/login', async (req: Request, res: Response) => {
 
     if (result.rows.length === 0) {
       logAudit({ action: 'login_failed', details: { username, reason: 'user_not_found' }, ipAddress: req.ip });
+      console.log(`Login failed: user_not_found (${username})`);
       return res.status(401).json({ error: 'Invalid credentials.' });
     }
 
@@ -29,6 +44,7 @@ router.post('/login', async (req: Request, res: Response) => {
 
     if (!validPassword) {
       logAudit({ userId: user.id, action: 'login_failed', details: { username, reason: 'wrong_password' }, ipAddress: req.ip });
+      console.log(`Login failed: wrong_password (${username})`);
       return res.status(401).json({ error: 'Invalid credentials.' });
     }
 
@@ -39,6 +55,7 @@ router.post('/login', async (req: Request, res: Response) => {
     );
 
     logAudit({ userId: user.id, action: 'login_success', details: { username, role: user.role }, ipAddress: req.ip });
+    console.log(`Login success: ${username} (${user.role})`);
 
     res.json({
       token,
@@ -53,7 +70,7 @@ router.post('/login', async (req: Request, res: Response) => {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Internal server error.' });
   }
-});
+}
 
 // Get current user profile
 router.get('/me', authenticate, async (req: AuthRequest, res: Response) => {
