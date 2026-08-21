@@ -58,23 +58,16 @@ if (existsSync(priceHistoryPath)) {
   }
 }
 
-// Always ensure admin/admin123 exists with correct password
-const adminUser = sqliteDb.prepare("SELECT id, password_hash FROM users WHERE username = 'admin'").get() as any;
-const passwordHash = bcrypt.hashSync('admin123', 10);
-
-if (!adminUser) {
-  console.log('No admin user found — creating admin/admin123...');
+// Seed default admin ONLY if no users exist (never force-reset passwords)
+const userCount = sqliteDb.prepare("SELECT COUNT(*) as count FROM users").get() as any;
+if (userCount && userCount.count === 0) {
+  console.log('No users found — seeding default admin...');
   const id = crypto.randomUUID();
+  const passwordHash = bcrypt.hashSync('admin123', 10);
   sqliteDb.prepare(
     "INSERT INTO users (id, username, password_hash, full_name, role, pin) VALUES (?, ?, ?, ?, ?, ?)"
   ).run(id, 'admin', passwordHash, 'System Admin', 'admin', '1234');
-  console.log('Admin created: admin / admin123 (PIN: 1234)');
-} else if (!bcrypt.compareSync('admin123', adminUser.password_hash)) {
-  console.log('Admin password hash is WRONG — resetting...');
-  sqliteDb.prepare("UPDATE users SET password_hash = ? WHERE username = 'admin'").run(passwordHash);
-  console.log('Admin password reset to admin123');
-} else {
-  console.log('Admin user OK');
+  console.log('Default admin created (admin / admin123)');
 }
 
 function transformSQL(sql: string): string {

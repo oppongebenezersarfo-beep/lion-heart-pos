@@ -8,24 +8,37 @@ import { logAudit } from '../utils/audit';
 
 const router = Router();
 
-// Login — supports both POST JSON and GET query params (Cloudflare bypass)
-router.post('/login', handleLogin);
-router.get('/login', handleLogin);
+// Simple rate limiter for login (5 attempts per 15 min per IP)
+const loginAttempts = new Map<string, { count: number; resetAt: number }>();
 
-async function handleLogin(req: Request, res: Response) {
+function checkLoginRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const record = loginAttempts.get(ip);
+
+  if (!record || now > record.resetAt) {
+    loginAttempts.set(ip, { count: 1, resetAt: now + 15 * 60 * 1000 });
+    return true;
+  }
+
+  if (record.count >= 5) {
+    return false;
+  }
+
+  record.count++;
+  return true;
+}
+
+// Login — POST only, never GET (prevents credential exposure in URLs/logs)
+router.post('/login', async (req: Request, res: Response) => {
   try {
-    let username: string | undefined;
-    let password: string | undefined;
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
 
-    if (req.method === 'GET') {
-      username = req.query.username as string;
-      password = req.query.password as string;
-    } else {
-      username = req.body?.username;
-      password = req.body?.password;
+    if (!checkLoginRateLimit(ip)) {
+      logAudit({ action: 'login_rate_limited', details: { ip }, ipAddress: ip });
+      return res.status(429).json({ error: 'Too many login attempts. Please try again in 15 minutes.' });
     }
 
-    console.log(`Login attempt: username=${username}, method=${req.method}, body=${JSON.stringify(req.body)}, query=${JSON.stringify(req.query)}`);
+    const { username, password } = req.body;
 
     if (!username || !password) {
       return res.status(400).json({ error: 'Username and password are required.' });
@@ -34,8 +47,7 @@ async function handleLogin(req: Request, res: Response) {
     const result = pool.query('SELECT * FROM users WHERE username = ? AND is_active = 1', [username]);
 
     if (result.rows.length === 0) {
-      logAudit({ action: 'login_failed', details: { username, reason: 'user_not_found' }, ipAddress: req.ip });
-      console.log(`Login failed: user_not_found (${username})`);
+      logAudit({ action: 'login_failed', details: { username, reason: 'user_not_found' }, ipAddress: ip });
       return res.status(401).json({ error: 'Invalid credentials.' });
     }
 
@@ -43,19 +55,17 @@ async function handleLogin(req: Request, res: Response) {
     const validPassword = await bcrypt.compare(password, user.password_hash);
 
     if (!validPassword) {
-      logAudit({ userId: user.id, action: 'login_failed', details: { username, reason: 'wrong_password' }, ipAddress: req.ip });
-      console.log(`Login failed: wrong_password (${username})`);
+      logAudit({ userId: user.id, action: 'login_failed', details: { username, reason: 'wrong_password' }, ipAddress: ip });
       return res.status(401).json({ error: 'Invalid credentials.' });
     }
 
     const token = jwt.sign(
       { id: user.id, username: user.username, role: user.role, fullName: user.full_name },
       config.jwtSecret,
-      { expiresIn: '8h' }
+      { algorithm: 'HS256', expiresIn: '8h' }
     );
 
-    logAudit({ userId: user.id, action: 'login_success', details: { username, role: user.role }, ipAddress: req.ip });
-    console.log(`Login success: ${username} (${user.role})`);
+    logAudit({ userId: user.id, action: 'login_success', details: { username, role: user.role }, ipAddress: ip });
 
     res.json({
       token,
@@ -67,10 +77,10 @@ async function handleLogin(req: Request, res: Response) {
       },
     });
   } catch (error) {
-    console.error('Login error:', error);
+    console.error('Login error');
     res.status(500).json({ error: 'Internal server error.' });
   }
-}
+});
 
 // Get current user profile
 router.get('/me', authenticate, async (req: AuthRequest, res: Response) => {
@@ -86,7 +96,7 @@ router.get('/me', authenticate, async (req: AuthRequest, res: Response) => {
 
     res.json(result.rows[0]);
   } catch (error) {
-    console.error('Get profile error:', error);
+    console.error('Get profile error');
     res.status(500).json({ error: 'Internal server error.' });
   }
 });
@@ -122,7 +132,7 @@ router.post('/verify-pin', authenticate, async (req: AuthRequest, res: Response)
       },
     });
   } catch (error) {
-    console.error('Verify PIN error:', error);
+    console.error('Verify PIN error');
     res.status(500).json({ error: 'Internal server error.' });
   }
 });

@@ -25,7 +25,7 @@ function generateReference(): string {
 
 function verifyPaystackSignature(req: Request): boolean {
   const signature = req.headers['x-paystack-signature'] as string;
-  if (!signature) return false;
+  if (!signature || !PAYSTACK_SECRET_KEY) return false;
 
   const rawBody = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
   const hash = crypto
@@ -33,7 +33,10 @@ function verifyPaystackSignature(req: Request): boolean {
     .update(rawBody)
     .digest('hex');
 
-  return hash === signature;
+  const hashBuf = Buffer.from(hash, 'hex');
+  const sigBuf = Buffer.from(signature, 'hex');
+  if (hashBuf.length !== sigBuf.length) return false;
+  return crypto.timingSafeEqual(hashBuf, sigBuf);
 }
 
 // Initiate mobile money payment
@@ -120,8 +123,7 @@ router.post('/initiate', authenticate, async (req: AuthRequest, res: Response) =
 
     const paystackError = error.response?.data;
     if (paystackError) {
-      const message = paystackError.message || paystackError.data?.message || 'Payment initiation failed';
-      return res.status(400).json({ error: message });
+      return res.status(400).json({ error: 'Payment initiation failed. Please try again.' });
     }
 
     res.status(500).json({ error: 'Failed to initiate payment. Please try again.' });
@@ -175,7 +177,7 @@ router.post('/submit-otp', authenticate, async (req: AuthRequest, res: Response)
 
     const paystackError = error.response?.data;
     if (paystackError) {
-      return res.status(400).json({ error: paystackError.message || 'OTP submission failed' });
+      return res.status(400).json({ error: 'OTP submission failed. Please try again.' });
     }
 
     res.status(500).json({ error: 'Failed to submit OTP.' });
@@ -316,7 +318,7 @@ router.get('/verify/:reference', authenticate, async (req: AuthRequest, res: Res
 
     const paystackError = error.response?.data;
     if (paystackError) {
-      return res.status(400).json({ error: paystackError.message || 'Verification failed' });
+      return res.status(400).json({ error: 'Verification failed. Please try again.' });
     }
 
     res.status(500).json({ error: 'Failed to verify payment.' });

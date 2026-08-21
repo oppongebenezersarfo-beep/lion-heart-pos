@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import pool from '../config/database';
 
 interface AuditParams {

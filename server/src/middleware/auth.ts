@@ -21,7 +21,7 @@ export const authenticate = (req: AuthRequest, res: Response, next: NextFunction
   const token = authHeader.split(' ')[1];
 
   try {
-    const decoded = jwt.verify(token, config.jwtSecret) as any;
+    const decoded = jwt.verify(token, config.jwtSecret, { algorithms: ['HS256'] }) as any;
     req.user = {
       id: decoded.id,
       username: decoded.username,
